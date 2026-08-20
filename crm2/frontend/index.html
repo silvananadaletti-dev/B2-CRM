@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CRM · Pré-Fabricados</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🧲</span>
+      <div>
+        <h1>CRM Pré-Fabricados</h1>
+        <p id="stat-line" class="stat-line">Carregando…</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div class="view-toggle">
+        <button id="view-kanban-btn" class="view-btn active" data-view="kanban">Kanban</button>
+        <button id="view-list-btn" class="view-btn" data-view="list">Lista</button>
+      </div>
+      <button id="new-lead-btn" class="btn btn-primary">+ Novo Lead</button>
+    </div>
+  </header>
+
+  <div class="tabbar">
+    <button id="tab-prospeccao-btn" class="tab-btn active" data-tab="Prospecção">
+      🧲 Prospecção <span class="tab-count" id="tab-count-prospeccao"></span>
+    </button>
+    <button id="tab-projetos-btn" class="tab-btn" data-tab="Negócios em Andamento">
+      🏗️ Negócios em Andamento <span class="tab-count" id="tab-count-projetos"></span>
+    </button>
+    <button id="tab-arquivados-btn" class="tab-btn" data-tab="Arquivados">
+      📦 Arquivados <span class="tab-count" id="tab-count-arquivados"></span>
+    </button>
+    <button id="tab-calendario-btn" class="tab-btn" data-tab="Calendário">
+      📅 Calendário <span class="tab-count" id="tab-count-calendario"></span>
+    </button>
+  </div>
+
+  <div class="filters">
+    <input id="search-input" type="text" placeholder="Buscar por cliente, contato, cidade, segmento ou tipo de obra…" />
+    <select id="filter-vendedor">
+      <option value="">Todos os vendedores</option>
+    </select>
+    <select id="filter-segmento">
+      <option value="">Todos os segmentos</option>
+    </select>
+    <select id="filter-cidade">
+      <option value="">Todas as cidades</option>
+    </select>
+    <button id="clear-filters-btn" class="btn btn-ghost">Limpar filtros</button>
+    <span id="filter-count" class="filter-count"></span>
+  </div>
+
+  <main id="kanban-view" class="kanban-board"></main>
+
+  <main id="list-view" class="list-view hidden">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="cliente_empresa">Cliente/Empresa</th>
+          <th data-sort="contato">Contato</th>
+          <th data-sort="segmento">Segmento</th>
+          <th data-sort="cidade">Cidade</th>
+          <th data-sort="vendedor">Vendedor</th>
+          <th data-sort="status">Status</th>
+          <th data-sort="proximo_contato">Próximo Contato</th>
+        </tr>
+      </thead>
+      <tbody id="list-tbody"></tbody>
+    </table>
+  </main>
+
+  <main id="calendar-view" class="calendar-view hidden">
+    <div class="calendar-header">
+      <div class="calendar-nav">
+        <button id="cal-prev-btn" class="btn-icon" title="Mês anterior">‹</button>
+        <span id="calendar-month-label" class="calendar-month-label"></span>
+        <button id="cal-next-btn" class="btn-icon" title="Próximo mês">›</button>
+      </div>
+      <button id="cal-today-btn" class="btn btn-ghost">Hoje</button>
+      <span id="calendar-count" class="filter-count"></span>
+    </div>
+    <div class="calendar-weekdays">
+      <span>Dom</span><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span>
+    </div>
+    <div id="calendar-grid" class="calendar-grid"></div>
+    <div id="calendar-unscheduled" class="calendar-unscheduled hidden">
+      <div class="section-label">Sem dia definido neste mês</div>
+      <div class="calendar-unscheduled-list"></div>
+    </div>
+  </main>
+
+  <div id="modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-title">Detalhes do Lead</h2>
+        <button id="modal-close" class="btn-icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <label>Cliente/Empresa
+          <input id="f-cliente" type="text" required />
+        </label>
+
+        <div class="section-label">Contato</div>
+        <div class="grid-2">
+          <label>Nome do contato
+            <input id="f-contato" type="text" />
+          </label>
+          <label>Cargo
+            <input id="f-cargo" type="text" />
+          </label>
+        </div>
+        <div class="grid-2">
+          <label>Telefone 1
+            <input id="f-tel1" type="text" placeholder="(00) 00000-0000" />
+          </label>
+          <label>Telefone 2
+            <input id="f-tel2" type="text" placeholder="(00) 00000-0000" />
+          </label>
+        </div>
+        <div class="grid-2">
+          <label>E-mail
+            <input id="f-email" type="email" />
+          </label>
+          <label>Segmento
+            <select id="f-segmento"></select>
+          </label>
+        </div>
+        <label id="f-segmento-outro-wrap" class="hidden">Novo segmento
+          <input id="f-segmento-outro" type="text" placeholder="Digite o segmento que ainda não está na lista" />
+        </label>
+
+        <div class="section-label">Pipeline</div>
+        <div class="grid-2">
+          <label>Cidade
+            <input id="f-cidade" type="text" />
+          </label>
+          <label>Vendedor
+            <select id="f-vendedor"><option value="">(sem vendedor)</option></select>
+          </label>
+        </div>
+        <div class="grid-2">
+          <label>Status do Lead
+            <select id="f-status"></select>
+          </label>
+          <label>Nº de Orçamentos
+            <input id="f-num" type="number" min="0" />
+          </label>
+        </div>
+        <label>Tipo de Obra
+          <input id="f-tipo" type="text" />
+        </label>
+
+        <div class="section-label">Datas</div>
+        <div class="grid-2">
+          <label>Primeiro Contato
+            <input id="f-primeiro-contato" type="date" />
+          </label>
+          <label>Próximo Contato
+            <input id="f-proximo-contato" type="text" placeholder="data ou mês/ano" />
+          </label>
+        </div>
+        <div class="grid-2">
+          <label>Primeiro Orçamento
+            <input id="f-primeiro" type="date" />
+          </label>
+          <label>Último Orçamento
+            <input id="f-ultimo" type="date" />
+          </label>
+        </div>
+
+        <label>Notas
+          <textarea id="f-notas" rows="4"></textarea>
+        </label>
+        <label>Origem / Indicação
+          <input id="f-origem" type="text" placeholder="prospecção, indicação, etc." />
+        </label>
+        <div id="f-orcamentos-wrap" class="orcamentos-links hidden">
+          <strong>Orçamentos vinculados (Notion):</strong>
+          <ul id="f-orcamentos-list"></ul>
+        </div>
+
+        <div id="f-activities-wrap" class="activities-wrap hidden">
+          <div class="section-label">Histórico de interações</div>
+          <ul id="f-activities-list" class="activities-list"></ul>
+          <div class="activity-form">
+            <div class="grid-3">
+              <input id="a-data" type="date" />
+              <select id="a-canal"></select>
+              <input id="a-followup" type="date" placeholder="follow-up" />
+            </div>
+            <input id="a-assunto" type="text" placeholder="Assunto do contato" />
+            <div class="grid-2">
+              <input id="a-resultado" type="text" placeholder="Resultado" />
+              <input id="a-proxima" type="text" placeholder="Próxima ação" />
+            </div>
+            <button id="add-activity-btn" class="btn btn-ghost">+ Registrar interação</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="delete-btn" class="btn btn-danger hidden">Excluir</button>
+        <div class="spacer"></div>
+        <button id="cancel-btn" class="btn btn-ghost">Cancelar</button>
+        <button id="save-btn" class="btn btn-primary">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

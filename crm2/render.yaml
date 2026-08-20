@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: crm-prefabricados
+    runtime: python
+    plan: starter
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DB_PATH
+        value: /var/data/crm.db
+    disk:
+      name: crm-data
+      mountPath: /var/data
+      sizeGB: 1
