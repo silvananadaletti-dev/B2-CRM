@@ -105,30 +105,42 @@ export async function ensureSeeded() {
 // Tamanho de cada lote enviado ao Turso via `batch()` (uma única chamada HTTP
 // por lote, em vez de uma chamada por linha) — é o que permite importar os
 // ~1880 leads dentro do tempo limite de uma execução de function.
-const SEED_CHUNK = 250;
+const SEED_CHUNK = 300;
+
+// Orçamento de tempo (ms) que uma única execução gasta semeando antes de
+// desistir e salvar o progresso — deixa folga pro resto do tempo limite da
+// function na Netlify. Uma próxima requisição continua de onde parou.
+const TIME_BUDGET_MS = Number(process.env.SEED_TIME_BUDGET_MS) || 8000;
+
+// Depois de reivindicado, por quanto tempo nenhuma outra execução concorrente
+// tenta assumir a semeadura — curto o bastante pra um usuário atualizando a
+// página algumas vezes conseguir terminar a importação sozinho.
+const CLAIM_LOCK_SECONDS = 30;
 
 async function doEnsureSeeded() {
   const db = getClient();
-  for (const stmt of SCHEMA_STATEMENTS) {
-    await db.execute(stmt);
-  }
+  await db.batch(SCHEMA_STATEMENTS, "write");
   await db.execute(`CREATE TABLE IF NOT EXISTS seed_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     status TEXT NOT NULL DEFAULT 'pending',
+    leads_offset INTEGER NOT NULL DEFAULT 0,
     claimed_at TEXT
   )`);
-  await db.execute("INSERT OR IGNORE INTO seed_state (id, status) VALUES (1, 'pending')");
+  await db.execute(
+    "INSERT OR IGNORE INTO seed_state (id, status, leads_offset) VALUES (1, 'pending', 0)"
+  );
 
-  const stateRes = await db.execute("SELECT status FROM seed_state WHERE id = 1");
-  if (stateRes.rows[0]?.status === "done") return;
+  const stateRes = await db.execute("SELECT status, leads_offset FROM seed_state WHERE id = 1");
+  let state = stateRes.rows[0];
+  if (state.status === "done") return;
 
   // Evita corrida entre execuções concorrentes (cold starts simultâneos): só
-  // segue quem conseguir "reivindicar" o estado 'pending', ou uma reivindicação
-  // antiga (mais de 2 minutos), sinal de que uma tentativa anterior travou/caiu
-  // no meio (por exemplo, por timeout).
+  // segue quem conseguir "reivindicar" a semeadura agora — outra execução que
+  // reivindicou há pouco tempo continua com prioridade.
   const claim = await db.execute(
-    `UPDATE seed_state SET status = 'running', claimed_at = datetime('now')
-     WHERE id = 1 AND (status = 'pending' OR (status = 'running' AND claimed_at < datetime('now', '-2 minutes')))`
+    `UPDATE seed_state SET claimed_at = datetime('now')
+     WHERE id = 1 AND status != 'done'
+       AND (claimed_at IS NULL OR claimed_at < datetime('now', '-${CLAIM_LOCK_SECONDS} seconds'))`
   );
   if (Number(claim.rowsAffected) === 0) {
     // Outra execução está (ou acabou de ficar) responsável por semear agora —
@@ -136,23 +148,38 @@ async function doEnsureSeeded() {
     return;
   }
 
-  try {
-    // Garante estado limpo: se uma tentativa anterior deixou dados parciais
-    // (por exemplo, importação interrompida por timeout no meio do caminho),
-    // começa a importação do zero em vez de tentar reconciliar o que já tem.
-    await db.execute("DELETE FROM orcamento_links");
-    await db.execute("DELETE FROM activities");
-    await db.execute("DELETE FROM leads");
-
-    await seedLeadsInBatches(db);
-    await seedPlanilhaInBatches(db);
-
-    await db.execute("UPDATE seed_state SET status = 'done' WHERE id = 1");
-  } catch (err) {
-    // Deixa em 'pending' pra uma próxima requisição poder tentar de novo.
-    await db.execute("UPDATE seed_state SET status = 'pending' WHERE id = 1");
-    throw err;
+  if (state.status === "pending") {
+    // Primeira vez de verdade (ou uma tentativa anterior tinha deixado dados
+    // parciais): garante estado limpo antes de começar a importar do zero.
+    await db.batch(
+      ["DELETE FROM orcamento_links", "DELETE FROM activities", "DELETE FROM leads"],
+      "write"
+    );
+    await db.execute("UPDATE seed_state SET status = 'leads', leads_offset = 0 WHERE id = 1");
+    state = { status: "leads", leads_offset: 0 };
   }
+
+  const deadline = Date.now() + TIME_BUDGET_MS;
+
+  if (state.status === "leads") {
+    const offsetReached = await seedLeadsInBatches(db, Number(state.leads_offset), deadline);
+    if (offsetReached < leadsSeed.length) {
+      // Orçamento de tempo estourou no meio da importação dos leads — salva
+      // o progresso; uma próxima requisição continua a partir daqui.
+      await db.execute({
+        sql: "UPDATE seed_state SET leads_offset = ? WHERE id = 1",
+        args: [offsetReached],
+      });
+      return;
+    }
+    await db.execute({
+      sql: "UPDATE seed_state SET status = 'planilha', leads_offset = ? WHERE id = 1",
+      args: [offsetReached],
+    });
+  }
+
+  await seedPlanilhaInBatches(db);
+  await db.execute("UPDATE seed_state SET status = 'done' WHERE id = 1");
 }
 
 const LEAD_INSERT_SQL = `INSERT INTO leads
@@ -160,12 +187,15 @@ const LEAD_INSERT_SQL = `INSERT INTO leads
    primeiro_orcamento, ultimo_orcamento, notas, origem)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-async function seedLeadsInBatches(db) {
-  // Primeira inicialização do banco: importa os dados originais (Notion + planilha),
-  // igual ao seed.py / import_planilha.py da versão Python/Render — mas em lotes,
-  // usando db.batch() (uma chamada HTTP por lote) em vez de um INSERT por vez.
-  for (let i = 0; i < leadsSeed.length; i += SEED_CHUNK) {
-    const chunk = leadsSeed.slice(i, i + SEED_CHUNK);
+// Importa leadsSeed[startOffset..] em lotes via db.batch() (uma chamada HTTP
+// por lote), parando assim que o orçamento de tempo (deadline) é atingido.
+// Retorna o índice até onde conseguiu chegar — igual a leadsSeed.length
+// quando termina tudo, ou um valor menor se precisou parar no meio.
+async function seedLeadsInBatches(db, startOffset, deadline) {
+  let offset = startOffset;
+  while (offset < leadsSeed.length) {
+    if (Date.now() > deadline) break;
+    const chunk = leadsSeed.slice(offset, offset + SEED_CHUNK);
     const statements = chunk.map((rec) => ({
       sql: LEAD_INSERT_SQL,
       args: [
@@ -197,7 +227,9 @@ async function seedLeadsInBatches(db) {
     for (let j = 0; j < linkStatements.length; j += SEED_CHUNK) {
       await db.batch(linkStatements.slice(j, j + SEED_CHUNK), "write");
     }
+    offset += chunk.length;
   }
+  return offset;
 }
 
 async function seedPlanilhaInBatches(db) {
