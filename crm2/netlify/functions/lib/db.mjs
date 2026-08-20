@@ -1,29 +1,7 @@
-
-Cloud
-/
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Db · MJS
 import { createClient } from "@libsql/client";
 import leadsSeed from "./data/leads_seed.json" with { type: "json" };
 import planilhaContatos from "./data/planilha_contatos.json" with { type: "json" };
- 
+
 // Funil de vendas, na ordem real usada pela equipe (planilha "Acompanhamento comercial"):
 // cadastro inicial -> primeiro contato agendado -> aguardando resposta -> follow-up de
 // nutrição -> orçamento ativo -> negociação -> desfecho (Perdido) / Arquivado.
@@ -42,14 +20,14 @@ export const CANAL_OPTIONS = [
   "Ligação", "Whatsapp", "E-mail", "Visita", "Reunião online",
   "Follow-up", "Orçamento enviado", "LinkedIn", "Instagram",
 ];
- 
+
 export const LEAD_FIELDS = [
   "cliente_empresa", "contato", "cargo", "telefone1", "telefone2", "email",
   "segmento", "cidade", "vendedor", "status", "tipo_obra", "num_orcamentos",
   "primeiro_orcamento", "ultimo_orcamento", "primeiro_contato", "proximo_contato",
   "notas", "origem",
 ];
- 
+
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS leads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,12 +73,12 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_orcamento_links_lead ON orcamento_links(lead_id)`,
   `CREATE INDEX IF NOT EXISTS idx_activities_lead ON activities(lead_id)`,
 ];
- 
+
 // Nota: como o cliente Turso/libSQL roda sobre HTTP (sem conexão persistente
 // com estado garantido entre chamadas), não confiamos em "ON DELETE CASCADE" /
 // PRAGMA foreign_keys — o cascade de exclusão é feito manualmente no código
 // (veja lead-detail.mjs), o que é mais robusto nesse contexto serverless.
- 
+
 let client = null;
 export function getClient() {
   if (!client) {
@@ -115,7 +93,7 @@ export function getClient() {
   }
   return client;
 }
- 
+
 let seededPromise = null;
 export async function ensureSeeded() {
   if (!seededPromise) {
@@ -123,12 +101,12 @@ export async function ensureSeeded() {
   }
   return seededPromise;
 }
- 
+
 // Tamanho de cada lote enviado ao Turso via `batch()` (uma única chamada HTTP
 // por lote, em vez de uma chamada por linha) — é o que permite importar os
 // ~1880 leads dentro do tempo limite de uma execução de function.
 const SEED_CHUNK = 250;
- 
+
 async function doEnsureSeeded() {
   const db = getClient();
   for (const stmt of SCHEMA_STATEMENTS) {
@@ -140,10 +118,10 @@ async function doEnsureSeeded() {
     claimed_at TEXT
   )`);
   await db.execute("INSERT OR IGNORE INTO seed_state (id, status) VALUES (1, 'pending')");
- 
+
   const stateRes = await db.execute("SELECT status FROM seed_state WHERE id = 1");
   if (stateRes.rows[0]?.status === "done") return;
- 
+
   // Evita corrida entre execuções concorrentes (cold starts simultâneos): só
   // segue quem conseguir "reivindicar" o estado 'pending', ou uma reivindicação
   // antiga (mais de 2 minutos), sinal de que uma tentativa anterior travou/caiu
@@ -157,7 +135,7 @@ async function doEnsureSeeded() {
     // não faz nada; uma próxima requisição confere de novo.
     return;
   }
- 
+
   try {
     // Garante estado limpo: se uma tentativa anterior deixou dados parciais
     // (por exemplo, importação interrompida por timeout no meio do caminho),
@@ -165,10 +143,10 @@ async function doEnsureSeeded() {
     await db.execute("DELETE FROM orcamento_links");
     await db.execute("DELETE FROM activities");
     await db.execute("DELETE FROM leads");
- 
+
     await seedLeadsInBatches(db);
     await seedPlanilhaInBatches(db);
- 
+
     await db.execute("UPDATE seed_state SET status = 'done' WHERE id = 1");
   } catch (err) {
     // Deixa em 'pending' pra uma próxima requisição poder tentar de novo.
@@ -176,12 +154,12 @@ async function doEnsureSeeded() {
     throw err;
   }
 }
- 
+
 const LEAD_INSERT_SQL = `INSERT INTO leads
   (cliente_empresa, cidade, vendedor, status, tipo_obra, num_orcamentos,
    primeiro_orcamento, ultimo_orcamento, notas, origem)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
- 
+
 async function seedLeadsInBatches(db) {
   // Primeira inicialização do banco: importa os dados originais (Notion + planilha),
   // igual ao seed.py / import_planilha.py da versão Python/Render — mas em lotes,
@@ -204,7 +182,7 @@ async function seedLeadsInBatches(db) {
       ],
     }));
     const results = await db.batch(statements, "write");
- 
+
     const linkStatements = [];
     results.forEach((res, idx) => {
       const leadId = Number(res.lastInsertRowid);
@@ -221,7 +199,7 @@ async function seedLeadsInBatches(db) {
     }
   }
 }
- 
+
 async function seedPlanilhaInBatches(db) {
   if (!planilhaContatos.length) return;
   const existingPairsRes = await db.execute("SELECT cliente_empresa, contato FROM leads");
@@ -255,18 +233,18 @@ async function seedPlanilhaInBatches(db) {
     await db.batch(statements, "write");
   }
 }
- 
+
 export function json(data, init = {}) {
   return new Response(JSON.stringify(data), {
     status: init.status || 200,
     headers: { "content-type": "application/json; charset=utf-8", ...(init.headers || {}) },
   });
 }
- 
+
 export function errorJson(message, status = 400) {
   return json({ detail: message }, { status });
 }
- 
+
 // sqlite/libSQL retorna BigInt para colunas INTEGER em alguns drivers — normaliza
 // pra Number/valores simples antes de serializar como JSON.
 export function rowToPlain(row) {
@@ -275,3 +253,4 @@ export function rowToPlain(row) {
     out[k] = typeof v === "bigint" ? Number(v) : v;
   }
   return out;
+}
