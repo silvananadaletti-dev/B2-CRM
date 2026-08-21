@@ -126,6 +126,14 @@ async function doEnsureSeeded() {
     leads_offset INTEGER NOT NULL DEFAULT 0,
     claimed_at TEXT
   )`);
+  // Migração: uma versão anterior deste arquivo criou a tabela seed_state sem
+  // a coluna leads_offset — em produção ela pode já existir sem essa coluna,
+  // e "CREATE TABLE IF NOT EXISTS" não altera uma tabela já existente.
+  try {
+    await db.execute("ALTER TABLE seed_state ADD COLUMN leads_offset INTEGER NOT NULL DEFAULT 0");
+  } catch (err) {
+    if (!/duplicate column/i.test(String(err?.message || err))) throw err;
+  }
   await db.execute(
     "INSERT OR IGNORE INTO seed_state (id, status, leads_offset) VALUES (1, 'pending', 0)"
   );
@@ -148,9 +156,10 @@ async function doEnsureSeeded() {
     return;
   }
 
-  if (state.status === "pending") {
-    // Primeira vez de verdade (ou uma tentativa anterior tinha deixado dados
-    // parciais): garante estado limpo antes de começar a importar do zero.
+  if (state.status !== "leads" && state.status !== "planilha") {
+    // Cobre 'pending' e também qualquer valor de status deixado por uma
+    // versão anterior deste arquivo (ex.: 'running') — nesses casos garante
+    // estado limpo antes de começar a importar do zero.
     await db.batch(
       ["DELETE FROM orcamento_links", "DELETE FROM activities", "DELETE FROM leads"],
       "write"
