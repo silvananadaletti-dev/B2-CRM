@@ -7,6 +7,22 @@
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
+  <div id="login-screen" class="login-screen">
+    <form id="login-form" class="login-card">
+      <div class="login-brand"><span class="brand-icon">🧲</span> CRM Pré-Fabricados</div>
+      <p class="sub">Entre com seu usuário e senha</p>
+      <label>Usuário
+        <input id="login-username" type="text" autocomplete="username" required />
+      </label>
+      <label>Senha
+        <input id="login-password" type="password" autocomplete="current-password" required />
+      </label>
+      <p id="login-error" class="login-error hidden"></p>
+      <button type="submit" class="btn btn-primary login-submit">Entrar</button>
+    </form>
+  </div>
+
+  <div id="app-root" class="hidden">
   <header class="topbar">
     <div class="brand">
       <span class="brand-icon">🧲</span>
@@ -21,6 +37,15 @@
         <button id="view-list-btn" class="view-btn" data-view="list">Lista</button>
       </div>
       <button id="new-lead-btn" class="btn btn-primary">+ Novo Lead</button>
+      <div class="user-menu">
+        <button id="user-menu-btn" class="btn btn-ghost user-menu-btn">
+          <span id="user-menu-name">…</span> ▾
+        </button>
+        <div id="user-menu-dropdown" class="user-menu-dropdown hidden">
+          <button id="account-btn" class="user-menu-item">Minha conta</button>
+          <button id="logout-btn" class="user-menu-item">Sair</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -36,6 +61,12 @@
     </button>
     <button id="tab-calendario-btn" class="tab-btn" data-tab="Calendário">
       📅 Calendário <span class="tab-count" id="tab-count-calendario"></span>
+    </button>
+    <button id="tab-mapa-btn" class="tab-btn" data-tab="Mapa Comercial">
+      🗺️ Mapa Comercial
+    </button>
+    <button id="tab-admin-btn" class="tab-btn hidden" data-tab="Administração">
+      ⚙️ Administração
     </button>
   </div>
 
@@ -91,6 +122,65 @@
       <div class="section-label">Sem dia definido neste mês</div>
       <div class="calendar-unscheduled-list"></div>
     </div>
+  </main>
+
+  <main id="mapa-view" class="mapa-view hidden">
+    <div class="mapa-app">
+      <div id="mapa-mapwrap" class="mapa-mapwrap">
+        <svg id="mapa-svg"></svg>
+        <div id="mapa-tooltip" class="mapa-tooltip"></div>
+        <div class="mapa-zoom-controls">
+          <button id="mapa-zoom-in" class="btn-icon" title="Aproximar">+</button>
+          <button id="mapa-zoom-out" class="btn-icon" title="Afastar">−</button>
+          <button id="mapa-zoom-reset" class="btn-icon" title="Redefinir">⤢</button>
+        </div>
+        <div id="mapa-loading" class="mapa-loading">Carregando mapa…</div>
+      </div>
+      <div class="mapa-sidebar">
+        <div class="sb-section">
+          <h1>Mapa Comercial</h1>
+          <p class="sub">Territórios por vendedor — RS · SC · PR</p>
+        </div>
+        <div class="sb-section">
+          <input id="mapa-search" type="text" placeholder="Buscar município…" />
+          <div id="mapa-search-results" class="mapa-search-results"></div>
+        </div>
+        <div class="sb-scroll">
+          <div id="mapa-regions-box"></div>
+        </div>
+        <div class="sb-section">
+          <p id="mapa-stats" class="sub"></p>
+          <div id="mapa-admin-actions" class="mapa-admin-actions hidden">
+            <button id="mapa-save-btn" class="btn btn-primary">Salvar alterações</button>
+            <button id="mapa-clear-btn" class="btn btn-ghost">Limpar tudo</button>
+          </div>
+          <p id="mapa-readonly-note" class="sub hidden">Somente o administrador edita o mapa. Você pode consultar os territórios livremente.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <main id="admin-view" class="admin-view hidden">
+    <div class="admin-header">
+      <div>
+        <h2>Usuários com acesso ao CRM</h2>
+        <p class="sub">Defina quem entra e o que cada pessoa enxerga.</p>
+      </div>
+      <button id="admin-new-user-btn" class="btn btn-primary">+ Novo usuário</button>
+    </div>
+    <table class="admin-users-table">
+      <thead>
+        <tr>
+          <th>Nome</th>
+          <th>Usuário</th>
+          <th>Papel</th>
+          <th>Vendedor</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="admin-users-tbody"></tbody>
+    </table>
   </main>
 
   <div id="modal-backdrop" class="modal-backdrop hidden">
@@ -210,6 +300,81 @@
     </div>
   </div>
 
+  <div id="account-modal" class="modal-backdrop hidden">
+    <div class="modal modal-small">
+      <div class="modal-header">
+        <h2>Minha conta</h2>
+        <button id="account-modal-close" class="btn-icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <p id="account-info" class="sub"></p>
+        <div class="section-label">Trocar senha</div>
+        <label>Senha atual
+          <input id="acc-current-password" type="password" autocomplete="current-password" />
+        </label>
+        <label>Nova senha
+          <input id="acc-new-password" type="password" autocomplete="new-password" />
+        </label>
+        <label>Confirmar nova senha
+          <input id="acc-new-password-confirm" type="password" autocomplete="new-password" />
+        </label>
+        <p id="account-error" class="login-error hidden"></p>
+        <p id="account-success" class="account-success hidden"></p>
+      </div>
+      <div class="modal-footer">
+        <div class="spacer"></div>
+        <button id="account-cancel-btn" class="btn btn-ghost">Fechar</button>
+        <button id="account-save-btn" class="btn btn-primary">Salvar senha</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="admin-user-modal" class="modal-backdrop hidden">
+    <div class="modal modal-small">
+      <div class="modal-header">
+        <h2 id="admin-user-modal-title">Novo usuário</h2>
+        <button id="admin-user-modal-close" class="btn-icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <label>Nome
+          <input id="au-nome" type="text" placeholder="Nome de exibição" />
+        </label>
+        <label>Usuário (login)
+          <input id="au-username" type="text" placeholder="ex: luciano" autocomplete="off" />
+        </label>
+        <div class="grid-2">
+          <label>Papel
+            <select id="au-role">
+              <option value="vendedor">Vendedor (só vê os próprios leads)</option>
+              <option value="admin">Administrador (vê tudo)</option>
+            </select>
+          </label>
+          <label id="au-vendedor-wrap">Vendedor vinculado
+            <select id="au-vendedor"></select>
+          </label>
+        </div>
+        <label id="au-password-wrap">Senha
+          <input id="au-password" type="text" placeholder="Defina uma senha inicial" autocomplete="off" />
+        </label>
+        <label class="checkbox-label">
+          <input id="au-active" type="checkbox" checked />
+          Usuário ativo (desmarque para bloquear o acesso sem excluir)
+        </label>
+        <p id="admin-user-error" class="login-error hidden"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="admin-user-delete-btn" class="btn btn-danger hidden">Excluir usuário</button>
+        <div class="spacer"></div>
+        <button id="admin-user-cancel-btn" class="btn btn-ghost">Cancelar</button>
+        <button id="admin-user-save-btn" class="btn btn-primary">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  </div>
+
   <script src="/app.js"></script>
+  <script src="/mapa.js"></script>
+  <script src="/admin.js"></script>
 </body>
 </html>

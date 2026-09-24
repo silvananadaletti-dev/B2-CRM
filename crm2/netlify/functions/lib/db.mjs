@@ -1,6 +1,7 @@
 import { createClient } from "@libsql/client";
 import leadsSeed from "./data/leads_seed.json" with { type: "json" };
 import planilhaContatos from "./data/planilha_contatos.json" with { type: "json" };
+import { hashPassword } from "./auth.mjs";
 
 // Funil de vendas, na ordem real usada pela equipe (planilha "Acompanhamento comercial"):
 // cadastro inicial -> primeiro contato agendado -> aguardando resposta -> follow-up de
@@ -15,7 +16,7 @@ export const STATUS_OPTIONS = [
   "Perdido",
   "Arquivado",
 ];
-export const VENDEDOR_OPTIONS = ["Augusto", "Luciano", "Jair", "Flávio", "Jorge"];
+export const VENDEDOR_OPTIONS = ["Augusto", "Luciano", "Jair", "Flávio", "Jorge", "Renan"];
 export const CANAL_OPTIONS = [
   "Ligação", "Whatsapp", "E-mail", "Visita", "Reunião online",
   "Follow-up", "Orçamento enviado", "LinkedIn", "Instagram",
@@ -72,7 +73,67 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_leads_vendedor ON leads(vendedor)`,
   `CREATE INDEX IF NOT EXISTS idx_orcamento_links_lead ON orcamento_links(lead_id)`,
   `CREATE INDEX IF NOT EXISTS idx_activities_lead ON activities(lead_id)`,
+  `CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'vendedor',
+    vendedor TEXT DEFAULT '',
+    nome TEXT DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS map_regions (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0
+  )`,
+  `CREATE TABLE IF NOT EXISTS map_assignments (
+    municipio_codigo TEXT PRIMARY KEY,
+    region_id TEXT NOT NULL
+  )`,
 ];
+
+// Papel + vendedor de cada login inicial. As senhas abaixo são só o ponto de
+// partida (geradas uma vez para o primeiro deploy) — cada pessoa deve trocar
+// a própria senha assim que entrar pela primeira vez (tela "Minha conta").
+const DEFAULT_USERS = [
+  { username: "sil", password: "ZeC2nagK3j", role: "admin", vendedor: "", nome: "Sil" },
+  { username: "luciano", password: "HdRPCUPcUn", role: "vendedor", vendedor: "Luciano", nome: "Luciano" },
+  { username: "renan", password: "ysf9EkarWy", role: "vendedor", vendedor: "Renan", nome: "Renan" },
+  { username: "jair", password: "PZssPhS5CJ", role: "vendedor", vendedor: "Jair", nome: "Jair" },
+];
+
+// Regiões/vendedores padrão do Mapa Comercial (mesmas do arquivo original
+// enviado por e-mail/desktop) — só usadas para popular a tabela na primeira
+// vez; depois disso o mapa é todo editável pela aba Administração/Mapa.
+const DEFAULT_MAP_REGIONS = [
+  { id: "r1", name: "Luciano", color: "#c5e1a5" },
+  { id: "r2", name: "Renan", color: "#d1c4e9" },
+  { id: "r3", name: "Jair", color: "#ffcc80" },
+];
+
+async function ensureUsersSeeded(db) {
+  const countRes = await db.execute("SELECT COUNT(*) as n FROM users");
+  if (Number(countRes.rows[0].n) > 0) return;
+  const statements = DEFAULT_USERS.map((u) => ({
+    sql: `INSERT INTO users (username, password_hash, role, vendedor, nome) VALUES (?, ?, ?, ?, ?)`,
+    args: [u.username, hashPassword(u.password), u.role, u.vendedor, u.nome],
+  }));
+  await db.batch(statements, "write");
+}
+
+async function ensureMapSeeded(db) {
+  const countRes = await db.execute("SELECT COUNT(*) as n FROM map_regions");
+  if (Number(countRes.rows[0].n) > 0) return;
+  const statements = DEFAULT_MAP_REGIONS.map((r, i) => ({
+    sql: `INSERT INTO map_regions (id, name, color, sort_order) VALUES (?, ?, ?, ?)`,
+    args: [r.id, r.name, r.color, i],
+  }));
+  await db.batch(statements, "write");
+}
 
 // Nota: como o cliente Turso/libSQL roda sobre HTTP (sem conexão persistente
 // com estado garantido entre chamadas), não confiamos em "ON DELETE CASCADE" /
@@ -120,6 +181,8 @@ const CLAIM_LOCK_SECONDS = 30;
 async function doEnsureSeeded() {
   const db = getClient();
   await db.batch(SCHEMA_STATEMENTS, "write");
+  await ensureUsersSeeded(db);
+  await ensureMapSeeded(db);
   await db.execute(`CREATE TABLE IF NOT EXISTS seed_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     status TEXT NOT NULL DEFAULT 'pending',

@@ -14,6 +14,48 @@ Esta é uma cópia independente dos dados — mudanças feitas aqui **não** sã
 sincronizadas de volta ao Notion nem à planilha, e vice-versa. Ambos continuam
 funcionando normalmente como estão hoje; este sistema é separado, conforme pedido.
 
+## Login e permissões por usuário
+
+O sistema agora exige login. Existem dois papéis:
+
+- **Administrador**: vê e edita todos os leads, o Mapa Comercial (edição) e a
+  aba Administração (gerencia usuários).
+- **Vendedor**: vê e edita só os próprios leads (mesmo tentando forçar outro
+  filtro pela URL/API, o backend sempre restringe ao vendedor logado). Vê o
+  Mapa Comercial em modo consulta (não edita).
+
+Usuários iniciais criados automaticamente no primeiro deploy (troque a senha
+assim que possível pelo menu "Minha conta", no canto superior direito):
+
+| Usuário   | Papel         | Vendedor  |
+|-----------|---------------|-----------|
+| `sil`     | Administrador | —         |
+| `luciano` | Vendedor      | Luciano   |
+| `renan`   | Vendedor      | Renan     |
+| `jair`    | Vendedor      | Jair      |
+
+As senhas iniciais foram combinadas separadamente (não ficam neste arquivo).
+Um administrador pode criar, editar, desativar/reativar, redefinir senha ou
+excluir qualquer usuário pela aba **Administração**.
+
+**Importante — variável de ambiente nova:** além de `TURSO_DATABASE_URL` e
+`TURSO_AUTH_TOKEN`, agora é preciso configurar também `AUTH_SECRET` (uma
+string aleatória longa, usada para assinar o login) nas variáveis de ambiente
+do Netlify. Sem ela, o login não funciona.
+
+## Mapa Comercial
+
+Nova aba com o mapa de municípios de RS/SC/PR (o mesmo territorial que já
+existia como arquivo avulso), agora dentro do CRM e salvo no banco (Turso) —
+qualquer pessoa que abrir o CRM vê o mesmo mapa atualizado. Só o administrador
+edita (pintar município, criar/renomear/remover região, trocar cor); vendedores
+só consultam. Regiões padrão já vêm criadas: Luciano, Renan e Jair.
+
+> Essas duas funcionalidades (login/permissões e Mapa Comercial) foram
+> implementadas apenas no backend Netlify/Turso (Opção B abaixo) — o backend
+> Python/Render (Opção A) não foi atualizado e não tem login. Se você usa o
+> Render, considere migrar para o Netlify para ter essas funções.
+
 ## O que tem aqui
 
 - **Backend**: Python + FastAPI + SQLite (`backend/`)
@@ -28,11 +70,13 @@ Baseado no fluxo real de trabalho identificado na planilha:
 `Prospect` (cadastro inicial) → `Fazer contato futuro` → `Aguardando resposta` →
 `Follow-up` → `Em orçamento` → `Negociação` / `Perdido` → `Arquivado`
 
-A interface é dividida em 4 abas:
+A interface é dividida em abas:
 - **Prospecção**: Prospect, Fazer contato futuro, Aguardando resposta, Follow-up
 - **Negócios em Andamento**: Em orçamento, Negociação, Perdido
 - **Arquivados**: Arquivado
 - **Calendário**: visão de agenda com todos os compromissos futuros (veja abaixo)
+- **Mapa Comercial**: territórios por vendedor no mapa de RS/SC/PR (veja seção própria abaixo)
+- **Administração** (só para o papel Administrador): gestão de usuários/login
 
 ## Funcionalidades
 
@@ -154,14 +198,15 @@ a ponta e os dois back-ends dão o mesmo resultado.
    variables**), adicione duas variáveis:
    - `TURSO_DATABASE_URL` = a URL do passo 2
    - `TURSO_AUTH_TOKEN` = o token do passo 2
+   - `AUTH_SECRET` = uma string aleatória longa qualquer (usada para assinar
+     o login) — sem ela a tela de login não funciona
 6. Deploy. Na primeira requisição à API, o próprio site importa
-   automaticamente os 1879 leads originais pro banco Turso — não precisa
-   rodar nada manualmente.
+   automaticamente os 1879 leads originais pro banco Turso, cria os usuários
+   iniciais (login) e o Mapa Comercial — não precisa rodar nada manualmente.
 7. O Netlify mostra um link tipo `https://seu-site.netlify.app`, acessível
-   de qualquer lugar.
-
-O mesmo aviso de segurança da opção Render vale aqui: **sem senha por
-enquanto**, não compartilhe o link publicamente.
+   de qualquer lugar. Diferente da opção Render, esta versão já **exige
+   login** (veja "Login e permissões por usuário" acima) — ainda assim, não
+   compartilhe o link/credenciais com quem não deveria ter acesso.
 
 ## Estrutura
 
@@ -181,11 +226,16 @@ crm2/
 ├── netlify/functions/             # backend JS/Turso — usado na Opção B (Netlify)
 │   ├── meta.mjs, stats.mjs, leads.mjs, lead-detail.mjs,
 │   │   lead-activities.mjs, activity-detail.mjs, activities-all.mjs
-│   └── lib/db.mjs                 # conexão Turso + schema + funil/canais + auto-seed
+│   ├── auth-login.mjs, auth-me.mjs, auth-change-password.mjs      # login
+│   ├── admin-users.mjs, admin-user-detail.mjs                     # gestão de usuários
+│   ├── map-data.mjs                                                # Mapa Comercial
+│   └── lib/db.mjs, lib/auth.mjs   # conexão Turso + schema + funil/canais + auto-seed + auth
 ├── frontend/                      # mesma interface, usada pelas duas opções
-│   ├── index.html
-│   ├── style.css
-│   └── app.js
+│   ├── index.html, style.css
+│   ├── app.js                     # CRM (leads/kanban/lista/calendário) + login
+│   ├── mapa.js                    # aba Mapa Comercial
+│   ├── admin.js                   # aba Administração (usuários)
+│   └── mapa-data.json             # geometria dos municípios de RS/SC/PR
 └── notion_export/
     ├── leads_seed.json            # dump dos 1832 leads exportados do Notion
     └── planilha_contatos.json     # dump dos 47 contatos da planilha comercial
@@ -193,8 +243,8 @@ crm2/
 
 ## Próximos passos possíveis
 
-- Autenticação de usuários (hoje qualquer pessoa com acesso ao link/máquina
-  pode editar — veja o aviso de segurança acima).
+- Login e permissões por usuário, e Mapa Comercial: ✅ feito (veja as seções
+  acima) — só na versão Netlify/Turso, não na versão Render.
 - Importar também o relatório diário de atividades (abas "jul26 (2)" e "ago26"
   da planilha, ~900 linhas) como histórico de interações — não foi feito ainda
   porque vincular cada linha ao lead certo exige um pareamento por nome que

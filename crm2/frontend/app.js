@@ -56,20 +56,137 @@ let state = {
   calendar: { year: new Date().getFullYear(), month: new Date().getMonth() },
 };
 
+let auth = { token: null, user: null };
+
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
+// ---------- Autenticação ----------
+
+const AUTH_STORAGE_KEY = "crm_auth";
+
+function loadStoredAuth() {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || !data.token) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function saveAuth(token, user) {
+  auth = { token, user };
+  try {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+  } catch { /* navegador sem storage disponível: sessão só dura a aba atual */ }
+}
+
+function clearAuth() {
+  auth = { token: null, user: null };
+  try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch { /* ignore */ }
+}
+
+function isAdmin() {
+  return auth.user && auth.user.role === "admin";
+}
+
 async function api(path, opts = {}) {
-  const res = await fetch(API + path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
+  const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  if (auth.token) headers["Authorization"] = `Bearer ${auth.token}`;
+  const res = await fetch(API + path, { ...opts, headers });
+  if (res.status === 401) {
+    clearAuth();
+    showLoginScreen("Sua sessão expirou. Entre novamente.");
+    throw new Error("Sessão expirada.");
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || "Erro na requisição");
   }
   if (res.status === 204) return null;
   return res.json();
+}
+
+function showLoginScreen(message) {
+  $("#app-root").classList.add("hidden");
+  $("#login-screen").classList.remove("hidden");
+  $("#login-password").value = "";
+  const errEl = $("#login-error");
+  if (message) {
+    errEl.textContent = message;
+    errEl.classList.remove("hidden");
+  } else {
+    errEl.classList.add("hidden");
+  }
+}
+
+function showApp() {
+  $("#login-screen").classList.add("hidden");
+  $("#app-root").classList.remove("hidden");
+  applyRoleUI();
+}
+
+function applyRoleUI() {
+  if (!auth.user) return;
+  $("#user-menu-name").textContent = auth.user.nome || auth.user.username;
+  $("#tab-admin-btn").classList.toggle("hidden", !isAdmin());
+  if (!isAdmin() && state.tab === "Administração") state.tab = "Prospecção";
+  // Vendedor: o filtro de vendedor não faz sentido (o backend já só devolve os
+  // próprios leads), então escondemos pra não confundir.
+  const filterVendedor = $("#filter-vendedor");
+  if (filterVendedor) filterVendedor.classList.toggle("hidden", !isAdmin());
+}
+
+async function bootstrapAuth() {
+  const stored = loadStoredAuth();
+  if (!stored) {
+    showLoginScreen();
+    return;
+  }
+  auth = stored;
+  try {
+    const me = await api("/auth/me");
+    auth.user = me;
+    saveAuth(auth.token, me);
+    showApp();
+    await loadAll();
+  } catch (err) {
+    clearAuth();
+    showLoginScreen();
+  }
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const username = $("#login-username").value.trim();
+  const password = $("#login-password").value;
+  const btn = $(".login-submit");
+  btn.disabled = true;
+  try {
+    const res = await fetch(API + "/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || "Usuário ou senha inválidos.");
+    saveAuth(data.token, data.user);
+    showApp();
+    await loadAll();
+  } catch (err) {
+    $("#login-error").textContent = err.message;
+    $("#login-error").classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function handleLogout() {
+  clearAuth();
+  showLoginScreen();
 }
 
 async function loadAll() {
@@ -168,11 +285,34 @@ function renderTabCounts() {
 
 function render() {
   const isCalendar = state.tab === "Calendário";
-  $(".view-toggle").classList.toggle("hidden", isCalendar);
+  const isMapa = state.tab === "Mapa Comercial";
+  const isAdminTab = state.tab === "Administração";
+  const isSpecialTab = isCalendar || isMapa || isAdminTab;
+
+  $(".filters").classList.toggle("hidden", isMapa || isAdminTab);
+  $(".view-toggle").classList.toggle("hidden", isSpecialTab);
   $("#calendar-view").classList.toggle("hidden", !isCalendar);
-  $("#filter-count").classList.toggle("hidden", isCalendar);
+  $("#mapa-view").classList.toggle("hidden", !isMapa);
+  $("#admin-view").classList.toggle("hidden", !isAdminTab);
+  $("#filter-count").classList.toggle("hidden", isSpecialTab);
 
   renderTabCounts();
+
+  if (isMapa) {
+    $("#kanban-view").classList.add("hidden");
+    $("#list-view").classList.add("hidden");
+    $("#calendar-view").classList.add("hidden");
+    if (window.MapaComercial) window.MapaComercial.show();
+    return;
+  }
+
+  if (isAdminTab) {
+    $("#kanban-view").classList.add("hidden");
+    $("#list-view").classList.add("hidden");
+    $("#calendar-view").classList.add("hidden");
+    if (isAdmin() && window.AdminPanel) window.AdminPanel.show();
+    return;
+  }
 
   if (isCalendar) {
     $("#kanban-view").classList.add("hidden");
@@ -456,7 +596,10 @@ function openModal(id) {
   $("#f-segmento-outro").value = knownSegmento ? "" : segValue;
   $("#f-segmento-outro-wrap").classList.toggle("hidden", knownSegmento);
   $("#f-cidade").value = lead ? lead.cidade : "";
-  $("#f-vendedor").value = lead ? lead.vendedor || "" : "";
+  // Vendedor não-admin: o lead sempre é (e continua sendo) dele — trava o campo
+  // pra não sugerir que ele poderia repassar pra outra pessoa (o backend recusaria).
+  $("#f-vendedor").value = isAdmin() ? (lead ? lead.vendedor || "" : "") : auth.user.vendedor;
+  $("#f-vendedor").disabled = !isAdmin();
   $("#f-status").value = lead ? lead.status : (STATUS_GROUPS[state.tab] ? STATUS_GROUPS[state.tab][0] : state.meta.status_options[0]);
   $("#f-num").value = lead ? lead.num_orcamentos : 0;
   $("#f-tipo").value = lead ? lead.tipo_obra || "" : "";
@@ -706,7 +849,74 @@ $("#modal-backdrop").addEventListener("click", (e) => {
   if (e.target.id === "modal-backdrop") closeModal();
 });
 
-loadAll().catch((err) => {
+// ---------- Login / menu do usuário / minha conta ----------
+
+$("#login-form").addEventListener("submit", handleLogin);
+
+$("#user-menu-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  $("#user-menu-dropdown").classList.toggle("hidden");
+});
+document.addEventListener("click", () => $("#user-menu-dropdown").classList.add("hidden"));
+
+$("#logout-btn").addEventListener("click", handleLogout);
+
+function openAccountModal() {
+  $("#user-menu-dropdown").classList.add("hidden");
+  $("#account-info").textContent = auth.user
+    ? `Logado como ${auth.user.nome || auth.user.username} (${auth.user.role === "admin" ? "administrador" : "vendedor: " + auth.user.vendedor})`
+    : "";
+  $("#acc-current-password").value = "";
+  $("#acc-new-password").value = "";
+  $("#acc-new-password-confirm").value = "";
+  $("#account-error").classList.add("hidden");
+  $("#account-success").classList.add("hidden");
+  $("#account-modal").classList.remove("hidden");
+}
+function closeAccountModal() {
+  $("#account-modal").classList.add("hidden");
+}
+$("#account-btn").addEventListener("click", openAccountModal);
+$("#account-modal-close").addEventListener("click", closeAccountModal);
+$("#account-cancel-btn").addEventListener("click", closeAccountModal);
+$("#account-modal").addEventListener("click", (e) => {
+  if (e.target.id === "account-modal") closeAccountModal();
+});
+$("#account-save-btn").addEventListener("click", async () => {
+  const current = $("#acc-current-password").value;
+  const next = $("#acc-new-password").value;
+  const confirm = $("#acc-new-password-confirm").value;
+  const errEl = $("#account-error");
+  const okEl = $("#account-success");
+  errEl.classList.add("hidden");
+  okEl.classList.add("hidden");
+  if (!current || !next) {
+    errEl.textContent = "Preencha a senha atual e a nova senha.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  if (next !== confirm) {
+    errEl.textContent = "A confirmação não bate com a nova senha.";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  try {
+    await api("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: current, new_password: next }),
+    });
+    okEl.textContent = "Senha alterada com sucesso.";
+    okEl.classList.remove("hidden");
+    $("#acc-current-password").value = "";
+    $("#acc-new-password").value = "";
+    $("#acc-new-password-confirm").value = "";
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove("hidden");
+  }
+});
+
+bootstrapAuth().catch((err) => {
   document.body.innerHTML = `<div style="padding:40px;font-family:sans-serif;color:#d64545;">
-    Erro ao carregar dados: ${escapeHtml(err.message)}</div>`;
+    Erro ao carregar: ${escapeHtml(err.message)}</div>`;
 });

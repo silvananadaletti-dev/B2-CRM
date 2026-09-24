@@ -1,11 +1,22 @@
 import { getClient, ensureSeeded, json, errorJson, rowToPlain } from "./lib/db.mjs";
+import { requireAuth, scopedVendedor, AuthError } from "./lib/auth.mjs";
 
 export default async (req, context) => {
   try {
+    const user = requireAuth(req);
+    const lockedVendedor = scopedVendedor(user);
     await ensureSeeded();
     const db = getClient();
     const leadId = Number(context.params.id);
     if (!leadId) return errorJson("ID inválido", 400);
+
+    if (lockedVendedor !== null) {
+      const owner = await db.execute({ sql: "SELECT vendedor FROM leads WHERE id = ?", args: [leadId] });
+      if (!owner.rows.length) return errorJson("Lead não encontrado", 404);
+      if ((owner.rows[0].vendedor || "") !== lockedVendedor) {
+        throw new AuthError("Este lead pertence a outro vendedor.", 403);
+      }
+    }
 
     if (req.method === "GET") {
       const rows = await db.execute({
@@ -36,7 +47,7 @@ export default async (req, context) => {
 
     return errorJson("Método não permitido", 405);
   } catch (err) {
-    return errorJson(err.message, 500);
+    return errorJson(err.message, err.status || 500);
   }
 };
 

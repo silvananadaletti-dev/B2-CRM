@@ -1,4 +1,5 @@
 import { getClient, ensureSeeded, json, errorJson, rowToPlain, STATUS_OPTIONS, VENDEDOR_OPTIONS } from "./lib/db.mjs";
+import { requireAuth, scopedVendedor, AuthError } from "./lib/auth.mjs";
 
 const PATCHABLE_FIELDS = [
   "cliente_empresa", "contato", "cargo", "telefone1", "telefone2", "email",
@@ -9,10 +10,21 @@ const PATCHABLE_FIELDS = [
 
 export default async (req, context) => {
   try {
+    const user = requireAuth(req);
+    const lockedVendedor = scopedVendedor(user);
     await ensureSeeded();
     const db = getClient();
     const leadId = Number(context.params.id);
     if (!leadId) return errorJson("ID inválido", 400);
+
+    // Vendedor não-admin só pode ver/editar/excluir leads que já são dele.
+    if (lockedVendedor !== null) {
+      const owner = await db.execute({ sql: "SELECT vendedor FROM leads WHERE id = ?", args: [leadId] });
+      if (!owner.rows.length) return errorJson("Lead não encontrado", 404);
+      if ((owner.rows[0].vendedor || "") !== lockedVendedor) {
+        throw new AuthError("Este lead pertence a outro vendedor.", 403);
+      }
+    }
 
     if (req.method === "GET") {
       const row = await db.execute({ sql: "SELECT * FROM leads WHERE id = ?", args: [leadId] });
@@ -41,6 +53,8 @@ export default async (req, context) => {
       if (fields.vendedor && fields.vendedor !== "" && !VENDEDOR_OPTIONS.includes(fields.vendedor)) {
         return errorJson(`Vendedor inválido: ${fields.vendedor}`);
       }
+      // Vendedor não-admin não pode "repassar" o lead para outra pessoa.
+      if (lockedVendedor !== null) fields.vendedor = lockedVendedor;
       const existing = await db.execute({ sql: "SELECT id FROM leads WHERE id = ?", args: [leadId] });
       if (!existing.rows.length) return errorJson("Lead não encontrado", 404);
       const setClause = Object.keys(fields).map((k) => `${k} = ?`).join(", ");
@@ -62,7 +76,7 @@ export default async (req, context) => {
 
     return errorJson("Método não permitido", 405);
   } catch (err) {
-    return errorJson(err.message, 500);
+    return errorJson(err.message, err.status || 500);
   }
 };
 
