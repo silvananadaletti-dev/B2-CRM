@@ -17,6 +17,94 @@
 
   let svg, mapwrap, tooltip, vb;
 
+  // --- Visão nacional (Brasil) --------------------------------------------
+  // Estados com território editável por município (o resto do Brasil só
+  // mostra se há proposta ativa ou não, sem edição por enquanto).
+  const ESTADOS_TERRITORIO = ["RS", "SC", "PR"];
+  let brasilLoaded = false;
+  let brasilData = null; // { viewBox, states: [{uf, nome, d}] }
+  let estadosAtivos = [];
+  let brasilView = true; // true = mapa do Brasil; false = detalhe RS/SC/PR
+
+  async function ensureBrasilLoaded() {
+    if (brasilLoaded) return;
+    const loadingEl = document.getElementById("mapa-brasil-loading");
+    loadingEl.classList.remove("hidden");
+    try {
+      const [geo, apiData] = await Promise.all([
+        fetch("/brasil-estados.json").then((r) => {
+          if (!r.ok) throw new Error("Não foi possível carregar o contorno dos estados.");
+          return r.json();
+        }),
+        api("/map-data"),
+      ]);
+      brasilData = geo;
+      estadosAtivos = apiData.estados_ativos || [];
+      // Reaproveita regions/assign já buscados para não pedir de novo quando
+      // o usuário clicar em RS/SC/PR (evita um round-trip extra).
+      regions = apiData.regions || [];
+      assign = apiData.assign || {};
+      nextRegionNum = regions.length + 1;
+      activeRegionId = regions[0] ? regions[0].id : null;
+      buildBrasilSvg();
+      brasilLoaded = true;
+    } finally {
+      loadingEl.classList.add("hidden");
+    }
+  }
+
+  function buildBrasilSvg() {
+    const brasilSvg = document.getElementById("mapa-brasil-svg");
+    brasilSvg.setAttribute("viewBox", brasilData.viewBox);
+    brasilSvg.innerHTML = "";
+    const tooltip2 = document.getElementById("mapa-brasil-tooltip");
+    const wrap = document.getElementById("mapa-brasil-mapwrap");
+
+    brasilData.states.forEach((s) => {
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.setAttribute("d", s.d);
+      const isTerritorio = ESTADOS_TERRITORIO.includes(s.uf);
+      const ativo = estadosAtivos.includes(s.uf);
+      let cls = "mapa-brasil-state";
+      if (isTerritorio) cls += " mapa-brasil-state--territorio";
+      else if (ativo) cls += " mapa-brasil-state--ativo";
+      else cls += " mapa-brasil-state--inativo";
+      p.setAttribute("class", cls);
+      p.addEventListener("mousemove", (e) => {
+        const rect = wrap.getBoundingClientRect();
+        tooltip2.textContent = isTerritorio
+          ? `${s.nome} — clique para ver território por vendedor`
+          : `${s.nome} — ${ativo ? "com proposta ativa" : "sem atividade no momento"}`;
+        tooltip2.style.left = e.clientX - rect.left + 14 + "px";
+        tooltip2.style.top = e.clientY - rect.top + 10 + "px";
+        tooltip2.style.display = "block";
+      });
+      p.addEventListener("mouseleave", () => { tooltip2.style.display = "none"; });
+      if (isTerritorio) {
+        p.addEventListener("click", () => showDetalhe());
+      }
+      brasilSvg.appendChild(p);
+    });
+  }
+
+  function showBrasil() {
+    brasilView = true;
+    document.getElementById("mapa-brasil").classList.remove("hidden");
+    document.querySelector(".mapa-app").classList.add("hidden");
+    ensureBrasilLoaded().catch((err) => {
+      alert("Erro ao carregar o mapa do Brasil: " + err.message);
+    });
+  }
+
+  function showDetalhe() {
+    brasilView = false;
+    document.getElementById("mapa-brasil").classList.add("hidden");
+    document.querySelector(".mapa-app").classList.remove("hidden");
+    ensureLoaded().catch((err) => {
+      alert("Erro ao carregar o mapa comercial: " + err.message);
+    });
+  }
+
   function editable() {
     return typeof isAdmin === "function" && isAdmin();
   }
@@ -280,6 +368,11 @@
       renderStats();
     });
 
+    document.getElementById("mapa-back-btn").addEventListener("click", () => {
+      if (dirty && editable() && !confirm("Você tem alterações não salvas no território. Sair mesmo assim?")) return;
+      showBrasil();
+    });
+
     window.addEventListener("beforeunload", (e) => {
       if (dirty && editable()) {
         e.preventDefault();
@@ -325,10 +418,11 @@
     show: function () {
       document.getElementById("mapa-admin-actions").classList.toggle("hidden", !editable());
       document.getElementById("mapa-readonly-note").classList.toggle("hidden", editable());
-      ensureLoaded().catch((err) => {
-        alert("Erro ao carregar o mapa comercial: " + err.message);
-      });
-      if (loaded) renderRegions(); // refaz a lista com/sem controles de edição, caso o papel do usuário tenha mudado
+      if (brasilView) {
+        showBrasil();
+      } else if (loaded) {
+        renderRegions(); // refaz a lista com/sem controles de edição, caso o papel do usuário tenha mudado
+      }
     },
   };
 })();

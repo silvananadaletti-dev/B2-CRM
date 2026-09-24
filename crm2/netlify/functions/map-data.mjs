@@ -1,5 +1,6 @@
 import { getClient, ensureSeeded, json, errorJson, rowToPlain } from "./lib/db.mjs";
 import { requireAuth, requireAdmin } from "./lib/auth.mjs";
+import { estadosAtivosFromLeads } from "./lib/geo.mjs";
 
 // Tamanho de lote ao regravar as atribuições de município -> região (mesmo
 // padrão usado no seed de leads, para não estourar limites de uma única
@@ -17,9 +18,20 @@ export default async (req) => {
       const assignRes = await db.execute("SELECT municipio_codigo, region_id FROM map_assignments");
       const assign = {};
       assignRes.rows.forEach((r) => { assign[r.municipio_codigo] = r.region_id; });
+
+      // Visão nacional: em quais estados (UF) existe pelo menos uma proposta
+      // ativa (independente de vendedor — visão da empresa toda, igual ao
+      // mapa de território que também não é filtrado por vendedor).
+      // `tem_orcamento_ativo` é calculado pela sincronização com o Notion
+      // (base ORÇAMENTOS) — ver lib/notion-sync.mjs — não pelo `status` do
+      // lead, que é controlado manualmente pelo vendedor no CRM.
+      const leadsRes = await db.execute("SELECT cidade FROM leads WHERE tem_orcamento_ativo = 1");
+      const estadosAtivos = estadosAtivosFromLeads(leadsRes.rows.map(rowToPlain));
+
       return json({
         regions: regionsRes.rows.map(rowToPlain).map((r) => ({ id: r.id, name: r.name, color: r.color })),
         assign,
+        estados_ativos: estadosAtivos,
       });
     }
 

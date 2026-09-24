@@ -1,4 +1,4 @@
-# CRM Pré-Fabricados
+# CRM B2 Construções e Pré-Moldados
 
 Sistema web (backend + frontend + banco de dados) para gestão de clientes/leads,
 construído a partir de duas fontes:
@@ -45,16 +45,74 @@ do Netlify. Sem ela, o login não funciona.
 
 ## Mapa Comercial
 
-Nova aba com o mapa de municípios de RS/SC/PR (o mesmo territorial que já
-existia como arquivo avulso), agora dentro do CRM e salvo no banco (Turso) —
-qualquer pessoa que abrir o CRM vê o mesmo mapa atualizado. Só o administrador
-edita (pintar município, criar/renomear/remover região, trocar cor); vendedores
-só consultam. Regiões padrão já vêm criadas: Luciano, Renan e Jair.
+Aba com dois níveis:
 
-> Essas duas funcionalidades (login/permissões e Mapa Comercial) foram
-> implementadas apenas no backend Netlify/Turso (Opção B abaixo) — o backend
-> Python/Render (Opção A) não foi atualizado e não tem login. Se você usa o
-> Render, considere migrar para o Netlify para ter essas funções.
+- **Mapa do Brasil** (tela inicial da aba): mostra todos os 27 estados. Os que
+  têm pelo menos uma proposta ativa (status "Em orçamento" ou "Negociação")
+  aparecem destacados; o resto aparece apagado. É informativo, ninguém edita.
+- **Território por vendedor** (RS/SC/PR): o mapa de municípios que já existia
+  como arquivo avulso, agora dentro do CRM e salvo no banco (Turso) — qualquer
+  pessoa que abrir o CRM vê o mesmo mapa atualizado. Clique em RS, SC ou PR no
+  mapa do Brasil pra abrir esse detalhe. Só o administrador edita (pintar
+  município, criar/renomear/remover região, trocar cor); vendedores só
+  consultam. Regiões padrão já vêm criadas: Luciano, Renan e Jair.
+
+Contorno dos 27 estados: [MapSVG](https://mapsvg.com/maps/brazil), licença
+CC BY 4.0 (crédito no rodapé da própria aba). Município → estado (pra saber em
+qual UF cada lead está, já que o campo "Cidade" nem sempre vem com a UF) usa a
+tabela de municípios do IBGE via o pacote `municipios-brasil` (MIT).
+
+> Essas funcionalidades (login/permissões, Mapa Comercial e sincronização com
+> o Notion) foram implementadas apenas no backend Netlify/Turso (Opção B
+> abaixo) — o backend Python/Render (Opção A) não foi atualizado e não tem
+> login. Se você usa o Render, considere migrar para o Netlify para ter essas
+> funções.
+
+## Sincronização com o Notion
+
+O CRM roda uma sincronização automática (a cada 15 minutos) que puxa da base
+**"💰 ORÇAMENTOS"** do Notion e atualiza os leads no CRM — sentido único, o
+Notion "alimenta" o CRM, nada que é digitado no CRM é escrito de volta no
+Notion. Além da execução automática, a aba Administração tem um botão
+**"Sincronizar agora"** pra forçar na hora.
+
+A base ORÇAMENTOS tem uma linha por **proposta** (um cliente pode ter várias).
+A sincronização agrupa as propostas pelo nome do cliente e grava **uma linha
+de lead por cliente** no CRM (não uma linha por orçamento):
+
+- Cidade e vendedor vêm da proposta mais recente do cliente.
+- Tipo de obra junta os itens ("Orçar") de todas as propostas do cliente.
+- Nº de orçamentos e as datas de primeiro/último orçamento são calculados a
+  partir de todas as propostas do cliente.
+- **Tem proposta ativa** (o que alimenta o Mapa Comercial nacional): verdadeiro
+  se pelo menos uma proposta do cliente estiver numa situação de
+  produção/fila no Notion (Leads, Aguardar informações, Fazer, Desenho 2D/3D,
+  Discriminativo, Revisão discriminativo, Aguardar cotação, Aguardar
+  projetos, Licitação) — isso é independente do `status` do lead no CRM, que
+  o vendedor controla manualmente.
+- Só sobrescreve o **status** de um lead que já existe no CRM quando a
+  situação da proposta mais recente do cliente é um fechamento no Notion:
+  `Concluído`/`Entregar` → `Cliente`, `Negado` → `Perdido`, `Arquivado` →
+  `Arquivado`. Se o vendedor já avançou esse lead pra um estágio que só existe
+  no CRM (`Negociação`, `Follow-up` etc.) e a proposta mais recente ainda está
+  em produção/fila, o estágio do CRM fica como está.
+- **Nunca** toca no campo `Notas` do CRM (é preenchido pelos vendedores
+  direto no CRM, independente do que tiver escrito no Notion).
+- Valores de "Vendedor" que não correspondem a um vendedor real do CRM (por
+  exemplo placeholders usados na base ORÇAMENTOS, como "Leads" ou
+  "Licitação") são ignorados — o campo fica em branco no CRM nesse caso.
+
+Pra funcionar, precisa de uma variável de ambiente nova no Netlify:
+
+- `NOTION_TOKEN`: um "internal integration secret" criado em
+  [notion.so/my-integrations](https://www.notion.so/my-integrations), com a
+  base **"ORÇAMENTOS"** compartilhada com essa integração (menu "..." da base
+  → Connections → adicionar a integração). Não é a base "CADASTRO DE
+  CLIENTES / LEADS" — essa não é usada pela sincronização.
+
+Sem essa variável configurada, a sincronização simplesmente não roda (fica
+"Ainda não sincronizado" na Administração) — o resto do CRM funciona
+normalmente do mesmo jeito.
 
 ## O que tem aqui
 
@@ -200,6 +258,9 @@ a ponta e os dois back-ends dão o mesmo resultado.
    - `TURSO_AUTH_TOKEN` = o token do passo 2
    - `AUTH_SECRET` = uma string aleatória longa qualquer (usada para assinar
      o login) — sem ela a tela de login não funciona
+   - `NOTION_TOKEN` = opcional, só se quiser a sincronização automática com o
+     Notion ativa (veja "Sincronização com o Notion" acima) — sem ela o resto
+     do CRM funciona normalmente, só a sincronização fica desligada
 6. Deploy. Na primeira requisição à API, o próprio site importa
    automaticamente os 1879 leads originais pro banco Turso, cria os usuários
    iniciais (login) e o Mapa Comercial — não precisa rodar nada manualmente.
@@ -229,13 +290,18 @@ crm2/
 │   ├── auth-login.mjs, auth-me.mjs, auth-change-password.mjs      # login
 │   ├── admin-users.mjs, admin-user-detail.mjs                     # gestão de usuários
 │   ├── map-data.mjs                                                # Mapa Comercial
-│   └── lib/db.mjs, lib/auth.mjs   # conexão Turso + schema + funil/canais + auto-seed + auth
+│   ├── notion-sync-run.mjs        # status + botão "Sincronizar agora" (admin)
+│   ├── notion-sync-scheduled.mjs  # roda sozinha a cada 15 min (Netlify Scheduled Functions)
+│   └── lib/db.mjs, lib/auth.mjs, lib/geo.mjs, lib/notion-sync.mjs
+│       # conexão Turso + schema + funil/canais + auto-seed + auth +
+│       # município→UF (mapa nacional) + sincronização com o Notion
 ├── frontend/                      # mesma interface, usada pelas duas opções
 │   ├── index.html, style.css
 │   ├── app.js                     # CRM (leads/kanban/lista/calendário) + login
-│   ├── mapa.js                    # aba Mapa Comercial
-│   ├── admin.js                   # aba Administração (usuários)
-│   └── mapa-data.json             # geometria dos municípios de RS/SC/PR
+│   ├── mapa.js                    # aba Mapa Comercial (Brasil + território RS/SC/PR)
+│   ├── admin.js                   # aba Administração (usuários + sync Notion)
+│   ├── mapa-data.json             # geometria dos municípios de RS/SC/PR
+│   └── brasil-estados.json        # contorno dos 27 estados (mapa nacional)
 └── notion_export/
     ├── leads_seed.json            # dump dos 1832 leads exportados do Notion
     └── planilha_contatos.json     # dump dos 47 contatos da planilha comercial

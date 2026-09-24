@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>CRM · Pré-Fabricados</title>
+<title>CRM · B2 Construções e Pré-Moldados</title>
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div id="login-screen" class="login-screen">
     <form id="login-form" class="login-card">
-      <div class="login-brand"><span class="brand-icon">🧲</span> CRM Pré-Fabricados</div>
+      <div class="login-brand"><span class="brand-icon">🧲</span> CRM B2 Construções e Pré-Moldados</div>
       <p class="sub">Entre com seu usuário e senha</p>
       <label>Usuário
         <input id="login-username" type="text" autocomplete="username" required />
@@ -27,7 +27,7 @@
     <div class="brand">
       <span class="brand-icon">🧲</span>
       <div>
-        <h1>CRM Pré-Fabricados</h1>
+        <h1>CRM B2 Construções e Pré-Moldados</h1>
         <p id="stat-line" class="stat-line">Carregando…</p>
       </div>
     </div>
@@ -125,7 +125,25 @@
   </main>
 
   <main id="mapa-view" class="mapa-view hidden">
-    <div class="mapa-app">
+    <div id="mapa-brasil" class="mapa-brasil">
+      <div class="mapa-brasil-header">
+        <h1>Mapa Comercial</h1>
+        <p class="sub">Onde há proposta ativa no Brasil — clique em RS, SC ou PR para editar o território por município</p>
+      </div>
+      <div id="mapa-brasil-mapwrap" class="mapa-brasil-mapwrap">
+        <svg id="mapa-brasil-svg" viewBox="0 0 613 639"></svg>
+        <div id="mapa-brasil-tooltip" class="mapa-tooltip"></div>
+        <div id="mapa-brasil-loading" class="mapa-loading">Carregando mapa…</div>
+      </div>
+      <div class="mapa-brasil-legend">
+        <span class="mapa-legend-item"><i class="mapa-legend-swatch mapa-legend-ativo"></i> Com proposta ativa</span>
+        <span class="mapa-legend-item"><i class="mapa-legend-swatch mapa-legend-inativo"></i> Sem atividade agora</span>
+        <span class="mapa-legend-item"><i class="mapa-legend-swatch mapa-legend-territorio"></i> RS · SC · PR — clique para ver território por vendedor</span>
+      </div>
+      <p class="mapa-credit">Contorno dos estados: <a href="https://mapsvg.com/maps/brazil" target="_blank" rel="noopener">MapSVG</a> (CC BY 4.0)</p>
+    </div>
+
+    <div class="mapa-app hidden">
       <div id="mapa-mapwrap" class="mapa-mapwrap">
         <svg id="mapa-svg"></svg>
         <div id="mapa-tooltip" class="mapa-tooltip"></div>
@@ -138,8 +156,9 @@
       </div>
       <div class="mapa-sidebar">
         <div class="sb-section">
-          <h1>Mapa Comercial</h1>
-          <p class="sub">Territórios por vendedor — RS · SC · PR</p>
+          <button id="mapa-back-btn" class="btn btn-ghost mapa-back-btn">‹ Voltar para o mapa do Brasil</button>
+          <h1>Território por vendedor</h1>
+          <p class="sub">RS · SC · PR</p>
         </div>
         <div class="sb-section">
           <input id="mapa-search" type="text" placeholder="Buscar município…" />
@@ -181,6 +200,14 @@
       </thead>
       <tbody id="admin-users-tbody"></tbody>
     </table>
+
+    <div class="admin-header admin-sync-box">
+      <div>
+        <h2>Sincronização com o Notion</h2>
+        <p id="admin-sync-status" class="sub">Carregando status…</p>
+      </div>
+      <button id="admin-sync-btn" class="btn btn-ghost">Sincronizar agora</button>
+    </div>
   </main>
 
   <div id="modal-backdrop" class="modal-backdrop hidden">

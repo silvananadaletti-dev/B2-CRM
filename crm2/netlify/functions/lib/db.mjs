@@ -13,6 +13,7 @@ export const STATUS_OPTIONS = [
   "Follow-up",
   "Em orçamento",
   "Negociação",
+  "Cliente",
   "Perdido",
   "Arquivado",
 ];
@@ -183,6 +184,41 @@ async function doEnsureSeeded() {
   await db.batch(SCHEMA_STATEMENTS, "write");
   await ensureUsersSeeded(db);
   await ensureMapSeeded(db);
+
+  // Migração: coluna usada pela sincronização com o Notion (chave estável por
+  // lead, pra saber se já existe/atualiza em vez de duplicar a cada sync).
+  // "CREATE TABLE IF NOT EXISTS" não adiciona colunas numa tabela leads que já
+  // existia em produção antes dessa mudança — daí o ALTER com catch abaixo,
+  // igual ao padrão já usado pra seed_state.leads_offset logo adiante.
+  try {
+    await db.execute("ALTER TABLE leads ADD COLUMN notion_page_id TEXT");
+  } catch (err) {
+    if (!/duplicate column/i.test(String(err?.message || err))) throw err;
+  }
+  // "Tem orçamento ativo agora?" — calculado pela sincronização com o Notion
+  // (base ORÇAMENTOS) a cada rodada, independente do `status` do lead (que é
+  // controlado manualmente pelo vendedor no CRM e não deve ser usado pra essa
+  // pergunta). É isso que alimenta o mapa nacional (estados com proposta ativa).
+  try {
+    await db.execute("ALTER TABLE leads ADD COLUMN tem_orcamento_ativo INTEGER DEFAULT 0");
+  } catch (err) {
+    if (!/duplicate column/i.test(String(err?.message || err))) throw err;
+  }
+  try {
+    await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_notion_page_id ON leads(notion_page_id) WHERE notion_page_id IS NOT NULL");
+  } catch (err) {
+    // Alguns drivers libSQL antigos não suportam índice único parcial (WHERE);
+    // nesse caso cai para um índice normal (não-único) — a sincronização já
+    // faz o dedup manualmente por notion_page_id antes de inserir, então não
+    // depende da constraint do banco para funcionar corretamente.
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_leads_notion_page_id ON leads(notion_page_id)");
+  }
+  await db.execute(`CREATE TABLE IF NOT EXISTS sync_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_synced_at TEXT,
+    last_result TEXT
+  )`);
+  await db.execute("INSERT OR IGNORE INTO sync_state (id) VALUES (1)");
   await db.execute(`CREATE TABLE IF NOT EXISTS seed_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     status TEXT NOT NULL DEFAULT 'pending',

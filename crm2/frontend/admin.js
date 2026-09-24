@@ -119,6 +119,48 @@
     }
   }
 
+  // --- Sincronização com o Notion ----------------------------------------
+  function parseUtc(str) {
+    if (!str) return null;
+    return new Date(str.replace(/Z$/, "") + "Z");
+  }
+
+  function formatSyncStatus(data) {
+    if (!data || !data.last_synced_at) {
+      return "Ainda não sincronizado com o Notion (roda sozinha a cada 15 min, ou clique em \"Sincronizar agora\").";
+    }
+    const date = parseUtc(data.last_synced_at);
+    const dateStr = date ? date.toLocaleString("pt-BR") : data.last_synced_at;
+    const r = data.last_result || {};
+    return `Última sincronização: ${dateStr} — ${r.criados || 0} novo(s), ${r.atualizados || 0} atualizado(s) de ${r.total_notion || 0} no Notion.`;
+  }
+
+  async function loadSyncStatus() {
+    const el = document.getElementById("admin-sync-status");
+    try {
+      const data = await api("/admin/notion-sync");
+      el.textContent = formatSyncStatus(data);
+    } catch (err) {
+      el.textContent = "Erro ao consultar status da sincronização: " + err.message;
+    }
+  }
+
+  async function handleSyncNow() {
+    const btn = document.getElementById("admin-sync-btn");
+    const el = document.getElementById("admin-sync-status");
+    btn.disabled = true;
+    btn.textContent = "Sincronizando…";
+    try {
+      const resumo = await api("/admin/notion-sync", { method: "POST" });
+      el.textContent = formatSyncStatus({ last_synced_at: resumo.quando, last_result: resumo });
+    } catch (err) {
+      el.textContent = "Erro ao sincronizar: " + err.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Sincronizar agora";
+    }
+  }
+
   function wire() {
     document.getElementById("admin-new-user-btn").addEventListener("click", () => openModal(null));
     document.getElementById("admin-user-modal-close").addEventListener("click", closeModal);
@@ -129,6 +171,7 @@
     document.getElementById("au-role").addEventListener("change", updateVendedorVisibility);
     document.getElementById("admin-user-save-btn").addEventListener("click", handleSave);
     document.getElementById("admin-user-delete-btn").addEventListener("click", handleDelete);
+    document.getElementById("admin-sync-btn").addEventListener("click", handleSyncNow);
   }
 
   let wired = false;
@@ -139,6 +182,7 @@
       loadUsers().catch((err) => {
         alert("Erro ao carregar usuários: " + err.message);
       });
+      loadSyncStatus();
       loaded = true;
     },
   };
