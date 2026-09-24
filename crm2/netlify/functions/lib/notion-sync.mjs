@@ -15,7 +15,13 @@ import { getClient, VENDEDOR_OPTIONS } from "./db.mjs";
 // compartilhada com ela — menu "•••" > Conexões, dentro do Notion).
 
 const NOTION_VERSION = "2022-06-28";
-const DATA_SOURCE_ID = "185237ac-46f5-81fc-ae11-000b65b61230"; // 💰 ORÇAMENTOS
+// ID da página/base "💰 ORÇAMENTOS" no Notion (não confundir com o ID de
+// "data source" que o Notion usa internamente pra bases com múltiplas fontes
+// de dados — descoberto na tentativa de teste real: usar o ID de data source
+// aqui dá "Could not find database" nesse endpoint mais antigo da API).
+// Extraído do link que a Sil compartilhou:
+// https://app.notion.com/p/185237ac46f5809fb117e70c705b84a6?v=...
+const DATABASE_ID = "185237ac-46f5-809f-b117-e70c705b84a6"; // 💰 ORÇAMENTOS
 
 // Valores de "Situação" (base ORÇAMENTOS) que contam como "em produção/fila"
 // — ou seja, proposta ainda ativa. Basta UM orçamento do cliente estar em
@@ -121,7 +127,7 @@ async function fetchAllNotionOrcamentos() {
   do {
     const body = { page_size: 100 };
     if (cursor) body.start_cursor = cursor;
-    const data = await notionFetch(`/databases/${DATA_SOURCE_ID}/query`, body);
+    const data = await notionFetch(`/databases/${DATABASE_ID}/query`, body);
     pages.push(...(data.results || []));
     cursor = data.has_more ? data.next_cursor : undefined;
   } while (cursor);
