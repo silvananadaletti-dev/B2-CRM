@@ -189,6 +189,14 @@ function aggregateCliente(cliente, orcamentos) {
   };
 }
 
+// Tamanho de cada lote enviado ao Turso via `batch()` — mesmo padrão usado em
+// lib/db.mjs pro seed inicial. Fazer um `db.execute()` por cliente (como a
+// primeira versão desta função fazia) significa uma chamada HTTP de rede por
+// cliente — com centenas de clientes isso facilmente estoura o tempo limite
+// de uma execução de function na Netlify. Em lote, é uma chamada HTTP por
+// lote de até CHUNK linhas.
+const CHUNK = 300;
+
 // Executa uma sincronização completa. Retorna um resumo { criados, atualizados,
 // total_notion, quando }. Lança erro se NOTION_TOKEN não estiver configurada
 // ou se a chamada à API do Notion falhar (o chamador decide como reportar).
@@ -206,16 +214,28 @@ export async function runNotionSync() {
   const existingRes = await db.execute("SELECT id, notion_page_id, status FROM leads WHERE notion_page_id IS NOT NULL");
   const existingByKey = new Map(existingRes.rows.map((r) => [r.notion_page_id, r]));
 
-  let criados = 0;
-  let atualizados = 0;
-
+  const toInsert = [];
+  const toUpdate = [];
   for (const c of clientes) {
     const key = clienteSyncKey(c.cliente_empresa);
     const existing = existingByKey.get(key);
+    if (existing) {
+      toUpdate.push({ ...c, key, existingId: existing.id, existingStatus: existing.status });
+    } else {
+      toInsert.push({ ...c, key });
+    }
+  }
 
-    if (!existing) {
+  // leadId -> urls dos orçamentos desse lead, preenchido conforme insere/atualiza
+  // em lote (pros inserts, o leadId só existe depois do INSERT rodar).
+  const linkRowsByLeadId = [];
+
+  // --- Cria leads novos, em lote -----------------------------------------
+  for (let i = 0; i < toInsert.length; i += CHUNK) {
+    const chunk = toInsert.slice(i, i + CHUNK);
+    const statements = chunk.map((c) => {
       const statusInicial = c.status_fechamento || (c.tem_orcamento_ativo ? "Em orçamento" : "Prospect");
-      const insertRes = await db.execute({
+      return {
         sql: `INSERT INTO leads
           (cliente_empresa, cidade, vendedor, status, tipo_obra, num_orcamentos,
            primeiro_orcamento, ultimo_orcamento, notas, origem, notion_page_id, tem_orcamento_ativo)
@@ -223,39 +243,66 @@ export async function runNotionSync() {
         args: [
           c.cliente_empresa, c.cidade, c.vendedor, statusInicial,
           c.tipo_obra, c.num_orcamentos, c.primeiro_orcamento, c.ultimo_orcamento,
-          key, c.tem_orcamento_ativo,
+          c.key, c.tem_orcamento_ativo,
         ],
-      });
-      const leadId = Number(insertRes.lastInsertRowid);
-      await replaceOrcamentoLinks(db, leadId, c.orcamento_urls);
-      criados++;
-      continue;
-    }
-
-    // Regra de conflito de status (ver SITUACAO_PARA_STATUS_FECHAMENTO acima):
-    // só troca o status do lead já existente se o Notion está mandando um
-    // fechamento; senão preserva o status atual do CRM.
-    const novoStatus = c.status_fechamento || existing.status;
-
-    await db.execute({
-      sql: `UPDATE leads SET
-              cliente_empresa = ?, cidade = ?, vendedor = ?, status = ?,
-              tipo_obra = ?, num_orcamentos = ?, primeiro_orcamento = ?,
-              ultimo_orcamento = ?, tem_orcamento_ativo = ?, updated_at = datetime('now')
-            WHERE id = ?`,
-      args: [
-        c.cliente_empresa, c.cidade, c.vendedor, novoStatus,
-        c.tipo_obra, c.num_orcamentos, c.primeiro_orcamento, c.ultimo_orcamento,
-        c.tem_orcamento_ativo, existing.id,
-      ],
+      };
     });
-    await replaceOrcamentoLinks(db, existing.id, c.orcamento_urls);
-    atualizados++;
+    const results = await db.batch(statements, "write");
+    results.forEach((res, idx) => {
+      linkRowsByLeadId.push({ leadId: Number(res.lastInsertRowid), urls: chunk[idx].orcamento_urls });
+    });
+  }
+
+  // --- Atualiza leads existentes, em lote ---------------------------------
+  for (let i = 0; i < toUpdate.length; i += CHUNK) {
+    const chunk = toUpdate.slice(i, i + CHUNK);
+    const statements = chunk.map((c) => {
+      // Regra de conflito de status (ver SITUACAO_PARA_STATUS_FECHAMENTO
+      // acima): só troca o status do lead já existente se o Notion está
+      // mandando um fechamento; senão preserva o status atual do CRM.
+      const novoStatus = c.status_fechamento || c.existingStatus;
+      return {
+        sql: `UPDATE leads SET
+                cliente_empresa = ?, cidade = ?, vendedor = ?, status = ?,
+                tipo_obra = ?, num_orcamentos = ?, primeiro_orcamento = ?,
+                ultimo_orcamento = ?, tem_orcamento_ativo = ?, updated_at = datetime('now')
+              WHERE id = ?`,
+        args: [
+          c.cliente_empresa, c.cidade, c.vendedor, novoStatus,
+          c.tipo_obra, c.num_orcamentos, c.primeiro_orcamento, c.ultimo_orcamento,
+          c.tem_orcamento_ativo, c.existingId,
+        ],
+      };
+    });
+    await db.batch(statements, "write");
+    chunk.forEach((c) => linkRowsByLeadId.push({ leadId: c.existingId, urls: c.orcamento_urls }));
+  }
+
+  // --- Regrava os links de orçamento de todo mundo, em lote ---------------
+  for (let i = 0; i < linkRowsByLeadId.length; i += CHUNK) {
+    const chunk = linkRowsByLeadId.slice(i, i + CHUNK);
+    const deleteStatements = chunk.map((r) => ({
+      sql: "DELETE FROM orcamento_links WHERE lead_id = ?",
+      args: [r.leadId],
+    }));
+    await db.batch(deleteStatements, "write");
+  }
+  const insertLinkStatements = [];
+  for (const r of linkRowsByLeadId) {
+    for (const url of r.urls) {
+      insertLinkStatements.push({
+        sql: "INSERT INTO orcamento_links (lead_id, url) VALUES (?, ?)",
+        args: [r.leadId, url],
+      });
+    }
+  }
+  for (let i = 0; i < insertLinkStatements.length; i += CHUNK) {
+    await db.batch(insertLinkStatements.slice(i, i + CHUNK), "write");
   }
 
   const resumo = {
-    criados,
-    atualizados,
+    criados: toInsert.length,
+    atualizados: toUpdate.length,
     total_notion: clientes.length,
     quando: new Date().toISOString(),
   };
@@ -264,14 +311,4 @@ export async function runNotionSync() {
     args: [JSON.stringify(resumo)],
   });
   return resumo;
-}
-
-async function replaceOrcamentoLinks(db, leadId, urls) {
-  await db.execute({ sql: "DELETE FROM orcamento_links WHERE lead_id = ?", args: [leadId] });
-  if (!urls.length) return;
-  const statements = urls.map((url) => ({
-    sql: "INSERT INTO orcamento_links (lead_id, url) VALUES (?, ?)",
-    args: [leadId, url],
-  }));
-  await db.batch(statements, "write");
 }
