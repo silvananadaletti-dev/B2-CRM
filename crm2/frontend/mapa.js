@@ -32,6 +32,14 @@
   // "Cliente" — a própria API /map-data já filtra isso, ver map-data.mjs),
   // com cliente e valor, e cada vendedor numa cor diferente. Um ponto no
   // mapa = um lead; a cor do ponto é o vendedor dele.
+  // Em 01/10/2026 ela pediu mais 3 coisas: (1) o mapa do Brasil INTEIRO, não
+  // só RS/SC/PR — resolvido com brasil-municipios-xy.json, uma projeção
+  // aproximada lat/long -> xy calibrada contra o contorno dos 27 estados
+  // (ver script de geração, não versionado aqui: ajuste por mínimos
+  // quadrados usando o centro de cada estado); (2) poder escolher ver todos
+  // os vendedores ou só alguns — clicar num vendedor na legenda liga/desliga
+  // ele, em ambos os mapas; (3) destacar quem está em "Negociação" — esses
+  // pontos ganham um contorno amarelo (classe mapa-negocio-dot--negociacao).
   const VENDEDOR_PALETTE = [
     "#e53935", "#1e88e5", "#43a047", "#fb8c00", "#8e24aa",
     "#00897b", "#c0ca33", "#6d4c41", "#d81b60", "#3949ab",
@@ -39,10 +47,15 @@
   const SEM_VENDEDOR_COLOR = "#9aa08e";
   let negocios = []; // array de leads cru, vindo da API (ver map-data.mjs)
   let vendedorColors = new Map(); // vendedor (string, "" = sem vendedor) -> cor
-  let negociosVisiveis = true;
+  let vendedorOcultos = new Set(); // vendedores que o usuário escondeu do mapa (filtro, vale pros 2 mapas)
+  let negociosVisiveis = true; // camada ligada/desligada no mapa do território (RS/SC/PR)
+  let negociosVisiveisBrasil = true; // camada ligada/desligada no mapa do Brasil
   let ufAggregates = new Map(); // UF -> { count, totalValor }
   let negociosPoints = []; // território (RS/SC/PR): [{x, y, color, ...negocio}]
+  let negociosPointsBrasil = []; // Brasil inteiro: [{x, y, color, ...negocio}]
   let negociosLayer = null; // <g> no svg do território
+  let negociosLayerBrasil = null; // <g> no svg do Brasil
+  let muniIndexNacional = null; // "nome normalizado|UF" -> {x,y}, carregado sob demanda
 
   function normalizeCidade(str) {
     return String(str || "")
@@ -76,6 +89,21 @@
       });
     }
     return vendedorColors.get(v) || SEM_VENDEDOR_COLOR;
+  }
+
+  // Carrega (uma vez só) a projeção aproximada dos ~5571 municípios do Brasil
+  // pra coordenadas x/y do mapa nacional (brasil-estados.json).
+  async function ensureMuniIndexNacional() {
+    if (muniIndexNacional) return muniIndexNacional;
+    const list = await fetch("/brasil-municipios-xy.json").then((r) => {
+      if (!r.ok) throw new Error("Não foi possível carregar as coordenadas dos municípios.");
+      return r.json();
+    });
+    muniIndexNacional = new Map();
+    list.forEach((m) => {
+      muniIndexNacional.set(normalizeCidade(m.n) + "|" + m.uf, m);
+    });
+    return muniIndexNacional;
   }
 
   // Agrega os negócios por UF (visão nacional) — conta e soma valor (quando
@@ -133,9 +161,51 @@
     });
   }
 
-  function renderNegociosLegend() {
-    const box = document.getElementById("mapa-negocios-legend");
-    const summary = document.getElementById("mapa-negocios-summary");
+  // Igual a buildNegociosPoints, mas pro mapa do Brasil inteiro (usa a
+  // projeção aproximada de município em vez da geometria detalhada de
+  // RS/SC/PR) — por isso o espalhamento entre negócios na mesma cidade é
+  // bem menor (o mapa nacional é bem mais "zoomado out").
+  function buildNegociosPointsBrasil() {
+    negociosPointsBrasil = [];
+    if (!muniIndexNacional) return;
+    const countPorMuni = new Map();
+    negocios.forEach((n) => {
+      if (!n.uf) return;
+      const key = normalizeCidade(cidadeSemUF(n.cidade)) + "|" + n.uf;
+      const m = muniIndexNacional.get(key);
+      if (!m) return;
+      const idx = countPorMuni.get(key) || 0;
+      countPorMuni.set(key, idx + 1);
+      const angle = idx * 2.4;
+      const radius = idx === 0 ? 0 : Math.min(0.6 + idx * 0.35, 2.5);
+      negociosPointsBrasil.push({
+        x: m.x + Math.cos(angle) * radius,
+        y: m.y + Math.sin(angle) * radius,
+        color: colorForVendedor(n.vendedor),
+        cliente_empresa: n.cliente_empresa,
+        cidade: n.cidade,
+        vendedor: n.vendedor,
+        valor: n.valor,
+        numero_proposta: n.numero_proposta,
+        status: n.status,
+      });
+    });
+  }
+
+  // Liga/desliga um vendedor no filtro (clicável tanto na legenda do mapa do
+  // território quanto na do mapa do Brasil) — reflete nos dois mapas juntos.
+  function toggleVendedorFiltro(v) {
+    if (vendedorOcultos.has(v)) vendedorOcultos.delete(v);
+    else vendedorOcultos.add(v);
+    renderNegociosLegend("mapa-negocios-legend", "mapa-negocios-summary", negociosPoints.length);
+    renderNegociosLegend("mapa-brasil-negocios-legend", "mapa-brasil-negocios-summary", negociosPointsBrasil.length);
+    renderNegociosLayer();
+    renderNegociosLayerBrasil();
+  }
+
+  function renderNegociosLegend(boxId, summaryId, localizados) {
+    const box = document.getElementById(boxId);
+    const summary = document.getElementById(summaryId);
     if (!box || !summary) return;
     const porVendedor = new Map(); // vendedor ("" = sem vendedor) -> count
     negocios.forEach((n) => {
@@ -148,15 +218,22 @@
       return b[1] - a[1]; // maior contagem primeiro
     });
     box.innerHTML = entries.map(([v, count]) => `
-      <div class="mapa-negocio-legend-item">
+      <div class="mapa-negocio-legend-item${vendedorOcultos.has(v) ? " off" : ""}" data-v="${escapeMapaHtml(v)}" title="Clique pra mostrar/ocultar">
         <span class="mapa-negocio-legend-swatch" style="background:${colorForVendedor(v)}"></span>
         <span>${escapeMapaHtml(v || "Sem vendedor")}</span>
         <span class="mapa-negocio-legend-count">${count}</span>
       </div>
     `).join("");
+    box.querySelectorAll(".mapa-negocio-legend-item").forEach((el) => {
+      el.addEventListener("click", () => toggleVendedorFiltro(el.getAttribute("data-v")));
+    });
     summary.textContent = negocios.length
-      ? `${negocios.length} negócios em andamento (Em orçamento, Negociação e Cliente) — ${negociosPoints.length} localizados em RS/SC/PR`
+      ? `${negocios.length} negócios em andamento (Em orçamento, Negociação e Cliente) — ${localizados} localizados no mapa`
       : "Nenhum negócio em andamento no momento.";
+  }
+
+  function negocioDotClass(p) {
+    return "mapa-negocio-dot" + (p.status === "Negociação" ? " mapa-negocio-dot--negociacao" : "");
   }
 
   function renderNegociosLayer() {
@@ -166,12 +243,13 @@
     negociosLayer.setAttribute("id", "mapa-negocios-layer");
     negociosLayer.style.display = negociosVisiveis ? "" : "none";
     negociosPoints.forEach((p) => {
+      if (vendedorOcultos.has(p.vendedor || "")) return;
       const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       c.setAttribute("cx", p.x);
       c.setAttribute("cy", p.y);
       c.setAttribute("r", 2.1);
       c.setAttribute("fill", p.color);
-      c.setAttribute("class", "mapa-negocio-dot");
+      c.setAttribute("class", negocioDotClass(p));
       c.addEventListener("mousemove", (e) => {
         e.stopPropagation(); // senão o listener do svg (abaixo) apaga esse tooltip por cima
         const valorFmt = formatBRL(p.valor);
@@ -182,6 +260,7 @@
         ];
         if (valorFmt) partes.push(valorFmt);
         if (p.numero_proposta) partes.push("Proposta " + p.numero_proposta);
+        if (p.status === "Negociação") partes.push("EM NEGOCIAÇÃO");
         tooltip.textContent = partes.join(" — ");
         const rect = mapwrap.getBoundingClientRect();
         tooltip.style.left = e.clientX - rect.left + 14 + "px";
@@ -192,6 +271,44 @@
       negociosLayer.appendChild(c);
     });
     svg.appendChild(negociosLayer);
+  }
+
+  // Igual a renderNegociosLayer, mas desenha no svg do mapa do Brasil
+  // inteiro (negociosPointsBrasil), usando o tooltip/wrap daquela visão.
+  function renderNegociosLayerBrasil() {
+    const brasilSvg = document.getElementById("mapa-brasil-svg");
+    if (!brasilSvg) return;
+    if (negociosLayerBrasil) negociosLayerBrasil.remove();
+    negociosLayerBrasil = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    negociosLayerBrasil.setAttribute("id", "mapa-brasil-negocios-layer");
+    negociosLayerBrasil.style.display = negociosVisiveisBrasil ? "" : "none";
+    const tooltip2 = document.getElementById("mapa-brasil-tooltip");
+    const wrap = document.getElementById("mapa-brasil-mapwrap");
+    negociosPointsBrasil.forEach((p) => {
+      if (vendedorOcultos.has(p.vendedor || "")) return;
+      const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", p.x);
+      c.setAttribute("cy", p.y);
+      c.setAttribute("r", 1.6);
+      c.setAttribute("fill", p.color);
+      c.setAttribute("class", negocioDotClass(p));
+      c.addEventListener("mousemove", (e) => {
+        e.stopPropagation();
+        const valorFmt = formatBRL(p.valor);
+        const partes = [p.cliente_empresa, p.cidade, p.vendedor || "sem vendedor"];
+        if (valorFmt) partes.push(valorFmt);
+        if (p.numero_proposta) partes.push("Proposta " + p.numero_proposta);
+        if (p.status === "Negociação") partes.push("EM NEGOCIAÇÃO");
+        tooltip2.textContent = partes.join(" — ");
+        const rect = wrap.getBoundingClientRect();
+        tooltip2.style.left = e.clientX - rect.left + 14 + "px";
+        tooltip2.style.top = e.clientY - rect.top + 10 + "px";
+        tooltip2.style.display = "block";
+      });
+      c.addEventListener("mouseleave", () => { tooltip2.style.display = "none"; });
+      negociosLayerBrasil.appendChild(c);
+    });
+    brasilSvg.appendChild(negociosLayerBrasil);
   }
 
   async function ensureBrasilLoaded() {
@@ -205,6 +322,7 @@
           return r.json();
         }),
         api("/map-data"),
+        ensureMuniIndexNacional(),
       ]);
       brasilData = geo;
       estadosAtivos = apiData.estados_ativos || [];
@@ -217,6 +335,13 @@
       nextRegionNum = regions.length + 1;
       activeRegionId = regions[0] ? regions[0].id : null;
       buildBrasilSvg();
+      buildNegociosPointsBrasil();
+      renderNegociosLayerBrasil();
+      renderNegociosLegend("mapa-brasil-negocios-legend", "mapa-brasil-negocios-summary", negociosPointsBrasil.length);
+      document.getElementById("mapa-brasil-negocios-toggle").addEventListener("change", (e) => {
+        negociosVisiveisBrasil = e.target.checked;
+        if (negociosLayerBrasil) negociosLayerBrasil.style.display = negociosVisiveisBrasil ? "" : "none";
+      });
       brasilLoaded = true;
     } finally {
       loadingEl.classList.add("hidden");
@@ -589,7 +714,7 @@
       renderStats();
       buildNegociosPoints();
       renderNegociosLayer();
-      renderNegociosLegend();
+      renderNegociosLegend("mapa-negocios-legend", "mapa-negocios-summary", negociosPoints.length);
       setViewBox(0, 0, MAP.width, MAP.height);
       wireInteractions();
       loaded = true;

@@ -133,12 +133,23 @@
     <div id="mapa-brasil" class="mapa-brasil">
       <div class="mapa-brasil-header">
         <h1>Mapa Comercial</h1>
-        <p class="sub">Onde há proposta ativa no Brasil — clique em RS, SC ou PR para editar o território por município</p>
+        <p class="sub">Negócios em andamento no Brasil todo — clique em RS, SC ou PR para editar o território por município</p>
       </div>
-      <div id="mapa-brasil-mapwrap" class="mapa-brasil-mapwrap">
-        <svg id="mapa-brasil-svg" viewBox="0 0 613 639"></svg>
-        <div id="mapa-brasil-tooltip" class="mapa-tooltip"></div>
-        <div id="mapa-brasil-loading" class="mapa-loading">Carregando mapa…</div>
+      <div class="mapa-brasil-body">
+        <div id="mapa-brasil-mapwrap" class="mapa-brasil-mapwrap">
+          <svg id="mapa-brasil-svg" viewBox="0 0 613 639"></svg>
+          <div id="mapa-brasil-tooltip" class="mapa-tooltip"></div>
+          <div id="mapa-brasil-loading" class="mapa-loading">Carregando mapa…</div>
+        </div>
+        <div class="mapa-brasil-side">
+          <div class="mapa-negocios-header">
+            <h1>Negócios em andamento</h1>
+            <label class="checkbox-label"><input type="checkbox" id="mapa-brasil-negocios-toggle" checked /> Mostrar no mapa</label>
+          </div>
+          <p id="mapa-brasil-negocios-summary" class="sub"></p>
+          <div id="mapa-brasil-negocios-legend" class="mapa-negocios-legend mapa-negocios-legend--scroll"></div>
+          <p class="sub mapa-negocios-hint">Clique num vendedor na lista pra mostrar/ocultar só os negócios dele. Pontos com contorno amarelo estão em Negociação.</p>
+        </div>
       </div>
       <div class="mapa-brasil-legend">
         <span class="mapa-legend-item"><i class="mapa-legend-swatch mapa-legend-ativo"></i> Com proposta ativa</span>
@@ -176,6 +187,7 @@
           </div>
           <p id="mapa-negocios-summary" class="sub"></p>
           <div id="mapa-negocios-legend" class="mapa-negocios-legend"></div>
+          <p class="sub mapa-negocios-hint">Clique num vendedor pra mostrar/ocultar só os negócios dele. Contorno amarelo = em Negociação.</p>
         </div>
         <div class="sb-scroll">
           <div id="mapa-regions-box"></div>
