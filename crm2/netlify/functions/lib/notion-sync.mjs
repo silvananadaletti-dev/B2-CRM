@@ -144,6 +144,12 @@ function mapOrcamentoPage(page) {
     situacao: p["Situação"]?.select?.name || "",
     orcar: (p["Orçar"]?.multi_select || []).map((o) => o.name).filter(Boolean),
     created_time: page.created_time || "",
+    // "Nº Proposta" (texto), "Revisão" e "Valor" (números) — pedido pela Sil
+    // em 30/09/2026: mostrar o número real da proposta no lugar de uma
+    // contagem, e trazer a revisão/valor do orçamento mais recente do cliente.
+    numero_proposta: plainText(p["Nº Proposta"]),
+    revisao: typeof p["Revisão"]?.number === "number" ? p["Revisão"].number : null,
+    valor: typeof p["Valor"]?.number === "number" ? p["Valor"].number : null,
   };
 }
 
@@ -192,6 +198,12 @@ function aggregateCliente(orcamentos) {
     status_fechamento: statusFechamento,
     tipo_obra: tipoObra,
     num_orcamentos: orcamentos.length,
+    // Do orçamento mais recente do cliente (não agregado — é o que a Sil
+    // pediu: "Nº da Proposta", Revisão e Valor de que orçamento está valendo
+    // agora, não uma soma/lista de todos os orçamentos do cliente).
+    numero_proposta: latest.numero_proposta || "",
+    revisao: latest.revisao,
+    valor: latest.valor,
     primeiro_orcamento: times[0] || "",
     ultimo_orcamento: times[times.length - 1] || "",
     orcamento_urls: orcamentos.map((o) => pageUrl(o.page_id)),
@@ -199,18 +211,143 @@ function aggregateCliente(orcamentos) {
 }
 
 // Tamanho de cada lote enviado ao Turso via `batch()` — mesmo padrão usado em
-// lib/db.mjs pro seed inicial. Fazer um `db.execute()` por cliente (como a
+// lib/db.mjs pro seed inicial. Fazer um `db.execute()` por cliente (like a
 // primeira versão desta função fazia) significa uma chamada HTTP de rede por
 // cliente — com centenas de clientes isso facilmente estoura o tempo limite
 // de uma execução de function na Netlify. Em lote, é uma chamada HTTP por
 // lote de até CHUNK linhas.
 const CHUNK = 300;
 
+// Compara Revisão/Valor (podem ser null quando o Notion não preencheu o
+// campo) tratando null/undefined como equivalentes — evita marcar "mudou"
+// só por causa de null vs undefined vindos de fontes diferentes (Notion vs.
+// linha já gravada no banco).
+function numEq(a, b) {
+  const an = a === null || a === undefined ? null : Number(a);
+  const bn = b === null || b === undefined ? null : Number(b);
+  return an === bn;
+}
+
+// Campos que só existem no CRM (nunca vêm do Notion) — ao mesclar um cliente
+// duplicado, preserva o que já tiver sido preenchido manualmente em qualquer
+// uma das linhas duplicadas, escolhendo a primeira não-vazia.
+const MERGE_BACKFILL_FIELDS = [
+  "contato", "cargo", "telefone1", "telefone2", "email", "segmento",
+  "notas", "origem", "primeiro_contato", "proximo_contato",
+];
+
+// Corrige a duplicidade entre o cadastro antigo (importado de planilha antes
+// de existir sincronização, sem notion_page_id) e o cadastro que a
+// sincronização com o Notion passou a gerar: quando o MESMO cliente (nome
+// normalizado) tem mais de uma linha em `leads`, mantém só uma — a que já
+// está ligada ao Notion (notion_page_id preenchido) quando existir —,
+// preserva nela o que tiver sido digitado manualmente nas outras (notas,
+// origem, contato, etc.), mexe as atividades/links de orçamento das
+// duplicatas pra linha que sobra, e só então apaga as duplicatas. Roda
+// sempre no início de uma sincronização, antes de criar/atualizar qualquer
+// coisa — pedido pela Sil em 01/10/2026 ao notar o mesmo cliente aparecendo
+// ao mesmo tempo em "Em orçamento" (cadastro antigo) e em "Cliente"
+// (sincronizado do Notion). Retorna quantas linhas duplicadas foram
+// removidas (0 quando não há nada pra mesclar — seguro de rodar sempre).
+async function mergeDuplicateLeads(db) {
+  const allRes = await db.execute(
+    `SELECT id, cliente_empresa, notion_page_id, num_orcamentos,
+            ${MERGE_BACKFILL_FIELDS.join(", ")}
+     FROM leads`
+  );
+
+  const groups = new Map();
+  for (const row of allRes.rows) {
+    const norm = normalizeClientName(row.cliente_empresa);
+    if (!groups.has(norm)) groups.set(norm, []);
+    groups.get(norm).push(row);
+  }
+
+  const activityMoves = [];
+  const linkMoves = [];
+  const leadUpdates = [];
+  const leadDeletes = [];
+
+  for (const rows of groups.values()) {
+    if (rows.length < 2) continue;
+
+    // Prioriza manter a linha já ligada ao Notion (dados mais completos e
+    // atualizados pela sincronização); sem nenhuma ligada, mantém a que tem
+    // mais orçamentos registrados (provavelmente a mais usada/atualizada).
+    const comNotion = rows.filter((r) => r.notion_page_id);
+    const keeper =
+      comNotion[0] ||
+      rows.reduce((a, b) => (Number(b.num_orcamentos || 0) > Number(a.num_orcamentos || 0) ? b : a));
+    const losers = rows.filter((r) => r.id !== keeper.id);
+    if (!losers.length) continue;
+
+    const fieldUpdates = {};
+    for (const f of MERGE_BACKFILL_FIELDS) {
+      const keeperVal = keeper[f];
+      if (keeperVal !== null && keeperVal !== undefined && String(keeperVal).trim() !== "") continue;
+      const fromLoser = losers.find((l) => l[f] !== null && l[f] !== undefined && String(l[f]).trim() !== "");
+      if (fromLoser) fieldUpdates[f] = fromLoser[f];
+    }
+
+    for (const loser of losers) {
+      activityMoves.push({ keeperId: keeper.id, loserId: loser.id });
+      linkMoves.push({ keeperId: keeper.id, loserId: loser.id });
+      leadDeletes.push(loser.id);
+    }
+    if (Object.keys(fieldUpdates).length) {
+      leadUpdates.push({ id: keeper.id, fields: fieldUpdates });
+    }
+  }
+
+  for (let i = 0; i < activityMoves.length; i += CHUNK) {
+    const chunk = activityMoves.slice(i, i + CHUNK);
+    await db.batch(
+      chunk.map((m) => ({ sql: "UPDATE activities SET lead_id = ? WHERE lead_id = ?", args: [m.keeperId, m.loserId] })),
+      "write"
+    );
+  }
+  for (let i = 0; i < linkMoves.length; i += CHUNK) {
+    const chunk = linkMoves.slice(i, i + CHUNK);
+    await db.batch(
+      chunk.map((m) => ({ sql: "UPDATE orcamento_links SET lead_id = ? WHERE lead_id = ?", args: [m.keeperId, m.loserId] })),
+      "write"
+    );
+  }
+  for (let i = 0; i < leadUpdates.length; i += CHUNK) {
+    const chunk = leadUpdates.slice(i, i + CHUNK);
+    await db.batch(
+      chunk.map((u) => {
+        const cols = Object.keys(u.fields);
+        return {
+          sql: `UPDATE leads SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`,
+          args: [...cols.map((c) => u.fields[c]), u.id],
+        };
+      }),
+      "write"
+    );
+  }
+  for (let i = 0; i < leadDeletes.length; i += CHUNK) {
+    const chunk = leadDeletes.slice(i, i + CHUNK);
+    await db.batch(
+      chunk.map((id) => ({ sql: "DELETE FROM leads WHERE id = ?", args: [id] })),
+      "write"
+    );
+  }
+
+  return leadDeletes.length;
+}
+
 // Executa uma sincronização completa. Retorna um resumo { criados, atualizados,
 // total_notion, quando }. Lança erro se NOTION_TOKEN não estiver configurada
 // ou se a chamada à API do Notion falhar (o chamador decide como reportar).
 export async function runNotionSync() {
   const db = getClient();
+
+  // Primeiro corrige duplicidade já existente (cadastro antigo x Notion) —
+  // ver mergeDuplicateLeads acima. Sempre antes de criar/atualizar qualquer
+  // coisa, pra já sincronizar em cima do estado limpo.
+  const duplicadosMesclados = await mergeDuplicateLeads(db);
+
   const notionPages = await fetchAllNotionOrcamentos();
   const orcamentos = notionPages
     .filter((pg) => !pg.archived && !pg.in_trash)
@@ -220,19 +357,81 @@ export async function runNotionSync() {
   const groups = groupByCliente(orcamentos);
   const clientes = Array.from(groups.values()).map((list) => aggregateCliente(list));
 
-  const existingRes = await db.execute("SELECT id, notion_page_id, status FROM leads WHERE notion_page_id IS NOT NULL");
-  const existingByKey = new Map(existingRes.rows.map((r) => [r.notion_page_id, r]));
+  // Traz todas as colunas que essa sincronização pode alterar, pra poder
+  // comparar e NÃO escrever de novo quando nada realmente mudou (ver
+  // "só grava quem mudou" logo abaixo — importante pro plano de escrita do
+  // banco: reescrever ~2000 clientes inteiros a cada 15 minutos, mesmo sem
+  // nenhuma mudança real, esgota rápido a cota de escrita do Turso).
+  const existingRes = await db.execute(
+    `SELECT id, notion_page_id, status, cliente_empresa, cidade, vendedor,
+            tipo_obra, num_orcamentos, numero_proposta, revisao, valor,
+            primeiro_orcamento, ultimo_orcamento, tem_orcamento_ativo
+     FROM leads`
+  );
+  // Dois mapas: por chave de sincronização (clientes já ligados ao Notion) e
+  // por nome normalizado, só dos SEM notion_page_id (cadastro antigo/manual)
+  // — usado pra "adotar" um lead antigo em vez de criar um novo duplicado
+  // quando o Notion manda um cliente que já existe no CRM sob outro nome.
+  const existingByKey = new Map();
+  const existingByNormName = new Map();
+  for (const r of existingRes.rows) {
+    if (r.notion_page_id) {
+      existingByKey.set(r.notion_page_id, r);
+    } else {
+      existingByNormName.set(normalizeClientName(r.cliente_empresa), r);
+    }
+  }
 
   const toInsert = [];
   const toUpdate = [];
+  let semAlteracao = 0;
   for (const c of clientes) {
     const key = clienteSyncKey(c.cliente_empresa);
-    const existing = existingByKey.get(key);
-    if (existing) {
-      toUpdate.push({ ...c, key, existingId: existing.id, existingStatus: existing.status });
-    } else {
-      toInsert.push({ ...c, key });
+    let existing = existingByKey.get(key);
+    // Adoção: não achou por chave do Notion, mas já existe um lead antigo
+    // (sem notion_page_id) com o mesmo nome normalizado — usa essa linha em
+    // vez de criar uma nova, ligando-a ao Notion a partir de agora.
+    let adotando = false;
+    if (!existing) {
+      const normName = normalizeClientName(c.cliente_empresa);
+      const legacyMatch = existingByNormName.get(normName);
+      if (legacyMatch) {
+        existing = legacyMatch;
+        adotando = true;
+        existingByNormName.delete(normName);
+      }
     }
+    if (!existing) {
+      toInsert.push({ ...c, key });
+      continue;
+    }
+
+    const novoStatus = c.status_fechamento || existing.status;
+    // Só grava quem mudou: se nenhum campo que a sincronização controla é
+    // diferente do que já está no banco, pula o UPDATE (e o reescrever dos
+    // links) desse cliente por completo — evita reescrever ~2000 linhas
+    // inteiras a cada rodada só porque a sincronização rodou de novo.
+    // Adoção sempre conta como "mudou" (precisa gravar o notion_page_id).
+    const mudou =
+      adotando ||
+      c.cliente_empresa !== existing.cliente_empresa ||
+      c.cidade !== existing.cidade ||
+      c.vendedor !== existing.vendedor ||
+      novoStatus !== existing.status ||
+      c.tipo_obra !== existing.tipo_obra ||
+      Number(c.num_orcamentos) !== Number(existing.num_orcamentos) ||
+      (c.numero_proposta || "") !== (existing.numero_proposta || "") ||
+      !numEq(c.revisao, existing.revisao) ||
+      !numEq(c.valor, existing.valor) ||
+      c.primeiro_orcamento !== existing.primeiro_orcamento ||
+      c.ultimo_orcamento !== existing.ultimo_orcamento ||
+      Number(c.tem_orcamento_ativo) !== Number(existing.tem_orcamento_ativo);
+
+    if (!mudou) {
+      semAlteracao++;
+      continue;
+    }
+    toUpdate.push({ ...c, key, existingId: existing.id, existingStatus: existing.status });
   }
 
   // leadId -> urls dos orçamentos desse lead, preenchido conforme insere/atualiza
@@ -247,11 +446,13 @@ export async function runNotionSync() {
       return {
         sql: `INSERT INTO leads
           (cliente_empresa, cidade, vendedor, status, tipo_obra, num_orcamentos,
+           numero_proposta, revisao, valor,
            primeiro_orcamento, ultimo_orcamento, notas, origem, notion_page_id, tem_orcamento_ativo)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)`,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)`,
         args: [
           c.cliente_empresa, c.cidade, c.vendedor, statusInicial,
-          c.tipo_obra, c.num_orcamentos, c.primeiro_orcamento, c.ultimo_orcamento,
+          c.tipo_obra, c.num_orcamentos, c.numero_proposta, c.revisao, c.valor,
+          c.primeiro_orcamento, c.ultimo_orcamento,
           c.key, c.tem_orcamento_ativo,
         ],
       };
@@ -273,13 +474,15 @@ export async function runNotionSync() {
       return {
         sql: `UPDATE leads SET
                 cliente_empresa = ?, cidade = ?, vendedor = ?, status = ?,
-                tipo_obra = ?, num_orcamentos = ?, primeiro_orcamento = ?,
-                ultimo_orcamento = ?, tem_orcamento_ativo = ?, updated_at = datetime('now')
+                tipo_obra = ?, num_orcamentos = ?, numero_proposta = ?, revisao = ?, valor = ?,
+                primeiro_orcamento = ?, ultimo_orcamento = ?, tem_orcamento_ativo = ?,
+                notion_page_id = ?, updated_at = datetime('now')
               WHERE id = ?`,
         args: [
           c.cliente_empresa, c.cidade, c.vendedor, novoStatus,
-          c.tipo_obra, c.num_orcamentos, c.primeiro_orcamento, c.ultimo_orcamento,
-          c.tem_orcamento_ativo, c.existingId,
+          c.tipo_obra, c.num_orcamentos, c.numero_proposta, c.revisao, c.valor,
+          c.primeiro_orcamento, c.ultimo_orcamento,
+          c.tem_orcamento_ativo, c.key, c.existingId,
         ],
       };
     });
@@ -312,6 +515,8 @@ export async function runNotionSync() {
   const resumo = {
     criados: toInsert.length,
     atualizados: toUpdate.length,
+    sem_alteracao: semAlteracao,
+    duplicados_mesclados: duplicadosMesclados,
     total_notion: clientes.length,
     quando: new Date().toISOString(),
   };

@@ -132,7 +132,9 @@
     const date = parseUtc(data.last_synced_at);
     const dateStr = date ? date.toLocaleString("pt-BR") : data.last_synced_at;
     const r = data.last_result || {};
-    return `Última sincronização: ${dateStr} — ${r.criados || 0} novo(s), ${r.atualizados || 0} atualizado(s) de ${r.total_notion || 0} no Notion.`;
+    const semAlteracaoTxt = typeof r.sem_alteracao === "number" ? `, ${r.sem_alteracao} sem alteração` : "";
+    const mescladosTxt = r.duplicados_mesclados ? `, ${r.duplicados_mesclados} duplicado(s) mesclado(s)` : "";
+    return `Última sincronização: ${dateStr} — ${r.criados || 0} novo(s), ${r.atualizados || 0} atualizado(s)${semAlteracaoTxt}${mescladosTxt} de ${r.total_notion || 0} no Notion.`;
   }
 
   async function loadSyncStatus() {
