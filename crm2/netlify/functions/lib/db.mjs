@@ -26,6 +26,7 @@ export const CANAL_OPTIONS = [
 export const LEAD_FIELDS = [
   "cliente_empresa", "contato", "cargo", "telefone1", "telefone2", "email",
   "segmento", "cidade", "vendedor", "status", "tipo_obra", "num_orcamentos",
+  "numero_proposta", "revisao", "valor",
   "primeiro_orcamento", "ultimo_orcamento", "primeiro_contato", "proximo_contato",
   "notas", "origem",
 ];
@@ -45,6 +46,9 @@ const SCHEMA_STATEMENTS = [
     status TEXT NOT NULL DEFAULT 'Prospect',
     tipo_obra TEXT DEFAULT '',
     num_orcamentos INTEGER DEFAULT 0,
+    numero_proposta TEXT DEFAULT '',
+    revisao REAL,
+    valor REAL,
     primeiro_orcamento TEXT DEFAULT '',
     ultimo_orcamento TEXT DEFAULT '',
     primeiro_contato TEXT DEFAULT '',
@@ -201,6 +205,28 @@ async function doEnsureSeeded() {
   // pergunta). É isso que alimenta o mapa nacional (estados com proposta ativa).
   try {
     await db.execute("ALTER TABLE leads ADD COLUMN tem_orcamento_ativo INTEGER DEFAULT 0");
+  } catch (err) {
+    if (!/duplicate column/i.test(String(err?.message || err))) throw err;
+  }
+  // Migração: "Nº da Proposta" (texto, vem do campo "Nº Proposta" da base
+  // ORÇAMENTOS no Notion — não confundir com num_orcamentos, que é uma
+  // CONTAGEM interna de quantos orçamentos o cliente tem, usada nos números
+  // agregados do topo do CRM; o vendedor não vê num_orcamentos diretamente,
+  // vê numero_proposta no lugar onde antes aparecia a contagem). Revisão e
+  // Valor são do orçamento mais recente do cliente, também vindos do Notion.
+  // Pedido pela Sil em 30/09/2026.
+  try {
+    await db.execute("ALTER TABLE leads ADD COLUMN numero_proposta TEXT DEFAULT ''");
+  } catch (err) {
+    if (!/duplicate column/i.test(String(err?.message || err))) throw err;
+  }
+  try {
+    await db.execute("ALTER TABLE leads ADD COLUMN revisao REAL");
+  } catch (err) {
+    if (!/duplicate column/i.test(String(err?.message || err))) throw err;
+  }
+  try {
+    await db.execute("ALTER TABLE leads ADD COLUMN valor REAL");
   } catch (err) {
     if (!/duplicate column/i.test(String(err?.message || err))) throw err;
   }
