@@ -1,4 +1,4 @@
-import { getClient, VENDEDOR_OPTIONS } from "./db.mjs";
+import { getClient } from "./db.mjs";
 
 // Sincronização Notion -> CRM (um sentido só: o Notion "alimenta" o CRM,
 // nada que o vendedor digita no CRM é escrito de volta no Notion).
@@ -185,10 +185,10 @@ function aggregateCliente(orcamentos) {
   const tipoObra = Array.from(new Set(orcamentos.flatMap((o) => o.orcar))).join(", ");
   const times = orcamentos.map((o) => o.created_time).filter(Boolean).sort();
 
-  // Filtra valores de "Vendedor" que não são vendedores reais do CRM
-  // (a base ORÇAMENTOS usa o mesmo campo pra placeholders como "Leads" ou
-  // "Licitação", e há um valor "Lucas" que não corresponde a ninguém no CRM).
-  const vendedor = VENDEDOR_OPTIONS.includes(latest.vendedor) ? latest.vendedor : "";
+  // Sempre traz o vendedor exatamente como está no Notion, mesmo que o nome
+  // não esteja na lista fixa de vendedores do CRM (ex.: "Luciano M.", "Lucas",
+  // "Licitação") — a Sil pediu para nunca descartar esse valor.
+  const vendedor = latest.vendedor || "";
 
   return {
     cliente_empresa: latest.cliente,
