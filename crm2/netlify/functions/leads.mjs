@@ -46,7 +46,11 @@ export default async (req) => {
       const values = LEAD_FIELDS.map((f) => {
         if (f === "status") return status;
         const v = body[f];
-        if (v === undefined || v === null) return f === "num_orcamentos" ? 0 : "";
+        if (v === undefined || v === null) {
+          if (f === "num_orcamentos") return 0;
+          if (f === "revisao" || f === "valor") return null;
+          return "";
+        }
         return v;
       });
       const cols = LEAD_FIELDS.join(", ");
