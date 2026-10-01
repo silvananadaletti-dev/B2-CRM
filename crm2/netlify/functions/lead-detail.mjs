@@ -4,6 +4,7 @@ import { requireAuth, scopedVendedor, AuthError } from "./lib/auth.mjs";
 const PATCHABLE_FIELDS = [
   "cliente_empresa", "contato", "cargo", "telefone1", "telefone2", "email",
   "segmento", "cidade", "vendedor", "status", "tipo_obra", "num_orcamentos",
+  "numero_proposta", "revisao", "valor",
   "primeiro_orcamento", "ultimo_orcamento", "primeiro_contato", "proximo_contato",
   "notas", "origem",
 ];
