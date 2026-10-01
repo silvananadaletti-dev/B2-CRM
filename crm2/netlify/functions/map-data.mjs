@@ -1,6 +1,6 @@
 import { getClient, ensureSeeded, json, errorJson, rowToPlain } from "./lib/db.mjs";
 import { requireAuth, requireAdmin } from "./lib/auth.mjs";
-import { estadosAtivosFromLeads, inferUFs } from "./lib/geo.mjs";
+import { inferUFs } from "./lib/geo.mjs";
 
 // Tamanho de lote ao regravar as atribuições de município -> região (mesmo
 // padrão usado no seed de leads, para não estourar limites de uma única
@@ -19,15 +19,6 @@ export default async (req) => {
       const assign = {};
       assignRes.rows.forEach((r) => { assign[r.municipio_codigo] = r.region_id; });
 
-      // Visão nacional: em quais estados (UF) existe pelo menos uma proposta
-      // ativa (independente de vendedor — visão da empresa toda, igual ao
-      // mapa de território que também não é filtrado por vendedor).
-      // `tem_orcamento_ativo` é calculado pela sincronização com o Notion
-      // (base ORÇAMENTOS) — ver lib/notion-sync.mjs — não pelo `status` do
-      // lead, que é controlado manualmente pelo vendedor no CRM.
-      const leadsRes = await db.execute("SELECT cidade FROM leads WHERE tem_orcamento_ativo = 1");
-      const estadosAtivos = estadosAtivosFromLeads(leadsRes.rows.map(rowToPlain));
-
       // Resumo visual de negócios no mapa — pedido pela Sil em 01/10/2026:
       // "negócios em andamento" aqui são os leads nos status Em orçamento,
       // Negociação e Cliente (as mesmas 3 colunas da aba "Negócios em
@@ -41,16 +32,26 @@ export default async (req) => {
          WHERE status IN ('Em orçamento', 'Negociação', 'Cliente')
            AND cliente_empresa != '' AND cidade != ''`
       );
-      // Resolve a UF de cada negócio aqui (reaproveitando a mesma lógica de
-      // inferência usada pra "estados_ativos" acima — sufixo ", UF" OU busca
-      // pelo nome do município na tabela de 5571 municípios do IBGE), porque
-      // nem toda cidade cadastrada tem o sufixo ", UF" (ex.: cadastro antigo,
-      // sem vir do Notion) — sem isso esses casos não apareceriam nem na
-      // contagem por estado nem nos pontos por município no front-end.
+      // Resolve a UF de cada negócio aqui (sufixo ", UF" OU busca pelo nome
+      // do município na tabela de 5571 municípios do IBGE), porque nem toda
+      // cidade cadastrada tem o sufixo ", UF" (ex.: cadastro antigo, sem vir
+      // do Notion) — sem isso esses casos não apareceriam nem na contagem
+      // por estado nem nos pontos por município no front-end.
       const negocios = negociosRes.rows.map(rowToPlain).map((n) => ({
         ...n,
         uf: inferUFs(n.cidade)[0] || null,
       }));
+
+      // Visão nacional: em quais estados (UF) existe pelo menos 1 negócio em
+      // andamento (mesmo critério acima, mesma lista de pontos) — pedido
+      // pela Sil em 01/10/2026: "quero que apareça o mapa de todos os
+      // estados com proposta ativa". Antes disso usava a coluna
+      // `tem_orcamento_ativo` (calculada pela sincronização com o Notion,
+      // base ORÇAMENTOS), que é um critério mais estrito/diferente e deixava
+      // vários estados com negócio em andamento aparecendo cinza (inativo)
+      // no mapa — agora os pontos e a cor do estado vêm sempre da mesma
+      // fonte, pra não haver estado sem cor com pontos nele (ou vice-versa).
+      const estadosAtivos = Array.from(new Set(negocios.map((n) => n.uf).filter(Boolean))).sort();
 
       return json({
         regions: regionsRes.rows.map(rowToPlain).map((r) => ({ id: r.id, name: r.name, color: r.color })),
