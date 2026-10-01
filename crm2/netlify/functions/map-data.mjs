@@ -1,6 +1,6 @@
 import { getClient, ensureSeeded, json, errorJson, rowToPlain } from "./lib/db.mjs";
 import { requireAuth, requireAdmin } from "./lib/auth.mjs";
-import { estadosAtivosFromLeads } from "./lib/geo.mjs";
+import { estadosAtivosFromLeads, inferUFs } from "./lib/geo.mjs";
 
 // Tamanho de lote ao regravar as atribuições de município -> região (mesmo
 // padrão usado no seed de leads, para não estourar limites de uma única
@@ -28,10 +28,35 @@ export default async (req) => {
       const leadsRes = await db.execute("SELECT cidade FROM leads WHERE tem_orcamento_ativo = 1");
       const estadosAtivos = estadosAtivosFromLeads(leadsRes.rows.map(rowToPlain));
 
+      // Resumo visual de negócios no mapa — pedido pela Sil em 01/10/2026:
+      // "negócios em andamento" aqui são os leads nos status Em orçamento,
+      // Negociação e Cliente (as mesmas 3 colunas da aba "Negócios em
+      // Andamento" do Kanban, MENOS "Perdido" — negócio perdido não é
+      // "negócio em andamento"). Cada linha vira um ponto no mapa, colorido
+      // por vendedor, mostrando cliente/valor/nº da proposta ao passar o
+      // mouse — ver mapa.js.
+      const negociosRes = await db.execute(
+        `SELECT cliente_empresa, cidade, vendedor, valor, numero_proposta, status
+         FROM leads
+         WHERE status IN ('Em orçamento', 'Negociação', 'Cliente')
+           AND cliente_empresa != '' AND cidade != ''`
+      );
+      // Resolve a UF de cada negócio aqui (reaproveitando a mesma lógica de
+      // inferência usada pra "estados_ativos" acima — sufixo ", UF" OU busca
+      // pelo nome do município na tabela de 5571 municípios do IBGE), porque
+      // nem toda cidade cadastrada tem o sufixo ", UF" (ex.: cadastro antigo,
+      // sem vir do Notion) — sem isso esses casos não apareceriam nem na
+      // contagem por estado nem nos pontos por município no front-end.
+      const negocios = negociosRes.rows.map(rowToPlain).map((n) => ({
+        ...n,
+        uf: inferUFs(n.cidade)[0] || null,
+      }));
+
       return json({
         regions: regionsRes.rows.map(rowToPlain).map((r) => ({ id: r.id, name: r.name, color: r.color })),
         assign,
         estados_ativos: estadosAtivos,
+        negocios,
       });
     }
 
