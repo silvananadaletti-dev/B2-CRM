@@ -15,8 +15,13 @@
         <input id="login-username" type="text" autocomplete="username" required />
       </label>
       <label>Senha
-        <input id="login-password" type="password" autocomplete="current-password" required />
+        <span class="password-field">
+          <input id="login-password" type="password" autocomplete="current-password" required />
+          <button type="button" class="password-toggle-btn" data-toggle-password="login-password" aria-label="Mostrar senha">👁</button>
+        </span>
       </label>
+      <button type="button" id="forgot-password-btn" class="forgot-password-link">Esqueceu a senha?</button>
+      <p id="forgot-password-info" class="forgot-password-info hidden">Fale com o administrador (Sil) para redefinir sua senha no painel de usuários.</p>
       <p id="login-error" class="login-error hidden"></p>
       <button type="submit" class="btn btn-primary login-submit">Entrar</button>
     </form>
@@ -345,13 +350,22 @@
         <p id="account-info" class="sub"></p>
         <div class="section-label">Trocar senha</div>
         <label>Senha atual
-          <input id="acc-current-password" type="password" autocomplete="current-password" />
+          <span class="password-field">
+            <input id="acc-current-password" type="password" autocomplete="current-password" />
+            <button type="button" class="password-toggle-btn" data-toggle-password="acc-current-password" aria-label="Mostrar senha">👁</button>
+          </span>
         </label>
         <label>Nova senha
-          <input id="acc-new-password" type="password" autocomplete="new-password" />
+          <span class="password-field">
+            <input id="acc-new-password" type="password" autocomplete="new-password" />
+            <button type="button" class="password-toggle-btn" data-toggle-password="acc-new-password" aria-label="Mostrar senha">👁</button>
+          </span>
         </label>
         <label>Confirmar nova senha
-          <input id="acc-new-password-confirm" type="password" autocomplete="new-password" />
+          <span class="password-field">
+            <input id="acc-new-password-confirm" type="password" autocomplete="new-password" />
+            <button type="button" class="password-toggle-btn" data-toggle-password="acc-new-password-confirm" aria-label="Mostrar senha">👁</button>
+          </span>
         </label>
         <p id="account-error" class="login-error hidden"></p>
         <p id="account-success" class="account-success hidden"></p>

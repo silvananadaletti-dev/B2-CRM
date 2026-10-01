@@ -846,6 +846,23 @@ $("#modal-backdrop").addEventListener("click", (e) => {
 
 $("#login-form").addEventListener("submit", handleLogin);
 
+// Mostrar/ocultar senha: qualquer botão com data-toggle-password="<id do input>"
+// alterna o type do input entre password/text e troca o ícone do olho.
+document.querySelectorAll("[data-toggle-password]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const input = document.getElementById(btn.dataset.togglePassword);
+    if (!input) return;
+    const showing = input.type === "text";
+    input.type = showing ? "password" : "text";
+    btn.textContent = showing ? "👁" : "🙈";
+    btn.setAttribute("aria-label", showing ? "Mostrar senha" : "Ocultar senha");
+  });
+});
+
+$("#forgot-password-btn").addEventListener("click", () => {
+  $("#forgot-password-info").classList.toggle("hidden");
+});
+
 $("#user-menu-btn").addEventListener("click", (e) => {
   e.stopPropagation();
   $("#user-menu-dropdown").classList.toggle("hidden");
