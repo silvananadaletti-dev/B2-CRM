@@ -481,6 +481,17 @@ tbody tr:hover { background: #f9fafc; }
 .mapa-admin-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .mapa-back-btn { width: 100%; margin-bottom: 10px; font-size: 12.5px; padding: 6px 10px; }
 
+/* ---------- Mapa Comercial: resumo de negócios por vendedor ---------- */
+.mapa-negocios-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mapa-negocios-header .checkbox-label { font-size: 11.5px !important; color: var(--muted); white-space: nowrap; }
+#mapa-negocios-summary { margin: 2px 0 8px; }
+.mapa-negocios-legend { display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto; }
+.mapa-negocio-legend-item { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.mapa-negocio-legend-swatch { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,.25); }
+.mapa-negocio-legend-count { margin-left: auto; color: var(--muted); font-size: 11px; }
+.mapa-negocio-dot { cursor: pointer; stroke: #fff; stroke-width: 0.4; }
+.mapa-negocio-dot:hover { stroke: #20241c; stroke-width: 0.9; }
+
 /* ---------- Mapa Comercial: visão nacional (Brasil) ---------- */
 .mapa-brasil { padding: 20px 24px 10px; display: flex; flex-direction: column; height: calc(100vh - 140px); box-sizing: border-box; }
 .mapa-brasil-header h1 { font-size: 16px; margin: 0 0 2px; }

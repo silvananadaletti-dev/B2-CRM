@@ -26,6 +26,174 @@
   let estadosAtivos = [];
   let brasilView = true; // true = mapa do Brasil; false = detalhe RS/SC/PR
 
+  // --- Resumo visual de negócios em andamento, por vendedor ---------------
+  // Pedido pela Sil em 01/10/2026: mostrar no mapa, dentro de cada cidade,
+  // os negócios em andamento (status "Em orçamento", "Negociação" e
+  // "Cliente" — a própria API /map-data já filtra isso, ver map-data.mjs),
+  // com cliente e valor, e cada vendedor numa cor diferente. Um ponto no
+  // mapa = um lead; a cor do ponto é o vendedor dele.
+  const VENDEDOR_PALETTE = [
+    "#e53935", "#1e88e5", "#43a047", "#fb8c00", "#8e24aa",
+    "#00897b", "#c0ca33", "#6d4c41", "#d81b60", "#3949ab",
+  ];
+  const SEM_VENDEDOR_COLOR = "#9aa08e";
+  let negocios = []; // array de leads cru, vindo da API (ver map-data.mjs)
+  let vendedorColors = new Map(); // vendedor (string, "" = sem vendedor) -> cor
+  let negociosVisiveis = true;
+  let ufAggregates = new Map(); // UF -> { count, totalValor }
+  let negociosPoints = []; // território (RS/SC/PR): [{x, y, color, ...negocio}]
+  let negociosLayer = null; // <g> no svg do território
+
+  function normalizeCidade(str) {
+    return String(str || "")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .trim();
+  }
+
+  function cidadeSemUF(cidade) {
+    return String(cidade || "").replace(/,\s*[A-Za-z]{2}\s*$/, "").trim();
+  }
+
+  function formatBRL(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    if (!isFinite(n)) return null;
+    return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+  }
+
+  // Cor fixa por vendedor (ordem alfabética, estável entre recarregamentos) —
+  // "" (sem vendedor) sempre usa a cor neutra SEM_VENDEDOR_COLOR, nunca uma
+  // da paleta.
+  function colorForVendedor(vendedor) {
+    const v = vendedor || "";
+    if (!v) return SEM_VENDEDOR_COLOR;
+    if (!vendedorColors.has(v)) {
+      const nomes = Array.from(new Set(negocios.map((n) => n.vendedor || ""))).filter(Boolean).sort();
+      nomes.forEach((nome, i) => {
+        if (!vendedorColors.has(nome)) vendedorColors.set(nome, VENDEDOR_PALETTE[i % VENDEDOR_PALETTE.length]);
+      });
+    }
+    return vendedorColors.get(v) || SEM_VENDEDOR_COLOR;
+  }
+
+  // Agrega os negócios por UF (visão nacional) — conta e soma valor (quando
+  // preenchido), independente de bater com um município específico. A UF já
+  // vem resolvida do backend (ver map-data.mjs: inferUFs), que cobre tanto o
+  // sufixo ", UF" quanto cidades antigas cadastradas sem ele.
+  function buildUfAggregates() {
+    ufAggregates = new Map();
+    negocios.forEach((n) => {
+      const uf = n.uf;
+      if (!uf) return;
+      if (!ufAggregates.has(uf)) ufAggregates.set(uf, { count: 0, totalValor: 0 });
+      const agg = ufAggregates.get(uf);
+      agg.count++;
+      if (n.valor !== null && n.valor !== undefined && n.valor !== "") agg.totalValor += Number(n.valor) || 0;
+    });
+  }
+
+  // Casa cada negócio (RS/SC/PR) com o município correspondente em MAP, pelo
+  // nome normalizado + UF, e calcula um ponto (com leve espalhamento quando
+  // há mais de um negócio no mesmo município, pra não ficarem 100% sobrepostos).
+  function buildNegociosPoints() {
+    negociosPoints = [];
+    if (!MAP) return;
+    const muniIndex = new Map(); // "nome normalizado|UF" -> município
+    MAP.municipios.forEach((m) => {
+      muniIndex.set(normalizeCidade(m.n) + "|" + m.uf, m);
+    });
+    const countPorMuni = new Map();
+    negocios.forEach((n) => {
+      const uf = n.uf;
+      if (!uf || !ESTADOS_TERRITORIO.includes(uf)) return;
+      const nome = normalizeCidade(cidadeSemUF(n.cidade));
+      const m = muniIndex.get(nome + "|" + uf);
+      if (!m) return;
+      const [x0, y0, x1, y1] = m.b;
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      const idx = countPorMuni.get(m.c) || 0;
+      countPorMuni.set(m.c, idx + 1);
+      // Espalha em espiral (ângulo dourado) ao redor do centro do município —
+      // cresce bem devagar pra caber dentro de municípios pequenos também.
+      const angle = idx * 2.4;
+      const radius = idx === 0 ? 0 : Math.min(1 + idx * 0.55, Math.max((x1 - x0), (y1 - y0)) / 2.2);
+      negociosPoints.push({
+        x: cx + Math.cos(angle) * radius,
+        y: cy + Math.sin(angle) * radius,
+        color: colorForVendedor(n.vendedor),
+        cliente_empresa: n.cliente_empresa,
+        cidade: n.cidade,
+        vendedor: n.vendedor,
+        valor: n.valor,
+        numero_proposta: n.numero_proposta,
+        status: n.status,
+      });
+    });
+  }
+
+  function renderNegociosLegend() {
+    const box = document.getElementById("mapa-negocios-legend");
+    const summary = document.getElementById("mapa-negocios-summary");
+    if (!box || !summary) return;
+    const porVendedor = new Map(); // vendedor ("" = sem vendedor) -> count
+    negocios.forEach((n) => {
+      const v = n.vendedor || "";
+      porVendedor.set(v, (porVendedor.get(v) || 0) + 1);
+    });
+    const entries = Array.from(porVendedor.entries()).sort((a, b) => {
+      if (!a[0]) return 1; // "sem vendedor" sempre por último
+      if (!b[0]) return -1;
+      return b[1] - a[1]; // maior contagem primeiro
+    });
+    box.innerHTML = entries.map(([v, count]) => `
+      <div class="mapa-negocio-legend-item">
+        <span class="mapa-negocio-legend-swatch" style="background:${colorForVendedor(v)}"></span>
+        <span>${escapeMapaHtml(v || "Sem vendedor")}</span>
+        <span class="mapa-negocio-legend-count">${count}</span>
+      </div>
+    `).join("");
+    summary.textContent = negocios.length
+      ? `${negocios.length} negócios em andamento (Em orçamento, Negociação e Cliente) — ${negociosPoints.length} localizados em RS/SC/PR`
+      : "Nenhum negócio em andamento no momento.";
+  }
+
+  function renderNegociosLayer() {
+    if (!svg) return;
+    if (negociosLayer) negociosLayer.remove();
+    negociosLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    negociosLayer.setAttribute("id", "mapa-negocios-layer");
+    negociosLayer.style.display = negociosVisiveis ? "" : "none";
+    negociosPoints.forEach((p) => {
+      const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", p.x);
+      c.setAttribute("cy", p.y);
+      c.setAttribute("r", 2.1);
+      c.setAttribute("fill", p.color);
+      c.setAttribute("class", "mapa-negocio-dot");
+      c.addEventListener("mousemove", (e) => {
+        e.stopPropagation(); // senão o listener do svg (abaixo) apaga esse tooltip por cima
+        const valorFmt = formatBRL(p.valor);
+        const partes = [
+          p.cliente_empresa,
+          p.cidade,
+          p.vendedor || "sem vendedor",
+        ];
+        if (valorFmt) partes.push(valorFmt);
+        if (p.numero_proposta) partes.push("Proposta " + p.numero_proposta);
+        tooltip.textContent = partes.join(" — ");
+        const rect = mapwrap.getBoundingClientRect();
+        tooltip.style.left = e.clientX - rect.left + 14 + "px";
+        tooltip.style.top = e.clientY - rect.top + 10 + "px";
+        tooltip.style.display = "block";
+      });
+      c.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+      negociosLayer.appendChild(c);
+    });
+    svg.appendChild(negociosLayer);
+  }
+
   async function ensureBrasilLoaded() {
     if (brasilLoaded) return;
     const loadingEl = document.getElementById("mapa-brasil-loading");
@@ -44,6 +212,8 @@
       // o usuário clicar em RS/SC/PR (evita um round-trip extra).
       regions = apiData.regions || [];
       assign = apiData.assign || {};
+      negocios = apiData.negocios || [];
+      buildUfAggregates();
       nextRegionNum = regions.length + 1;
       activeRegionId = regions[0] ? regions[0].id : null;
       buildBrasilSvg();
@@ -72,9 +242,13 @@
       p.setAttribute("class", cls);
       p.addEventListener("mousemove", (e) => {
         const rect = wrap.getBoundingClientRect();
+        const agg = ufAggregates.get(s.uf);
+        const negocioTxt = agg
+          ? `${agg.count} negócio${agg.count === 1 ? "" : "s"} em andamento${agg.totalValor ? " — " + formatBRL(agg.totalValor) : ""}`
+          : "sem negócios em andamento";
         tooltip2.textContent = isTerritorio
-          ? `${s.nome} — clique para ver território por vendedor`
-          : `${s.nome} — ${ativo ? "com proposta ativa" : "sem atividade no momento"}`;
+          ? `${s.nome} — ${negocioTxt} — clique para ver no mapa por município`
+          : `${s.nome} — ${negocioTxt}`;
         tooltip2.style.left = e.clientX - rect.left + 14 + "px";
         tooltip2.style.top = e.clientY - rect.top + 10 + "px";
         tooltip2.style.display = "block";
@@ -373,6 +547,11 @@
       showBrasil();
     });
 
+    document.getElementById("mapa-negocios-toggle").addEventListener("change", (e) => {
+      negociosVisiveis = e.target.checked;
+      if (negociosLayer) negociosLayer.style.display = negociosVisiveis ? "" : "none";
+    });
+
     window.addEventListener("beforeunload", (e) => {
       if (dirty && editable()) {
         e.preventDefault();
@@ -399,6 +578,8 @@
       MAP = mapData;
       regions = apiData.regions || [];
       assign = apiData.assign || {};
+      negocios = apiData.negocios || [];
+      buildUfAggregates();
       nextRegionNum = regions.length + 1;
       activeRegionId = regions[0] ? regions[0].id : null;
       svg.setAttribute("viewBox", `0 0 ${MAP.width} ${MAP.height}`);
@@ -406,6 +587,9 @@
       renderRegions();
       repaint();
       renderStats();
+      buildNegociosPoints();
+      renderNegociosLayer();
+      renderNegociosLegend();
       setViewBox(0, 0, MAP.width, MAP.height);
       wireInteractions();
       loaded = true;
