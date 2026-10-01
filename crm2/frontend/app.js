@@ -348,8 +348,6 @@ function renderKanban(filtered) {
   board.innerHTML = "";
   statuses.forEach((status) => {
     const items = grouped[status];
-    const limit = state.columnLimits[status] || 60;
-    const visible = items.slice(0, limit);
     const col = document.createElement("div");
     col.className = "kanban-column";
     col.style.setProperty("--col-color", STATUS_COLORS[status] || "#999");
@@ -362,17 +360,7 @@ function renderKanban(filtered) {
       <div class="kanban-column-body" data-status="${escapeHtml(status)}"></div>
     `;
     const body = col.querySelector(".kanban-column-body");
-    visible.forEach((lead) => body.appendChild(renderCard(lead)));
-    if (items.length > visible.length) {
-      const more = document.createElement("button");
-      more.className = "load-more-btn";
-      more.textContent = `Carregar mais (${items.length - visible.length} restantes)`;
-      more.onclick = () => {
-        state.columnLimits[status] = limit + 60;
-        render();
-      };
-      body.appendChild(more);
-    }
+    items.forEach((lead) => body.appendChild(renderCard(lead)));
 
     body.addEventListener("dragover", (e) => {
       e.preventDefault();
