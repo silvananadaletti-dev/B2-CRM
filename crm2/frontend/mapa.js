@@ -25,6 +25,8 @@
   let brasilData = null; // { viewBox, states: [{uf, nome, d}] }
   let estadosAtivos = [];
   let brasilView = true; // true = mapa do Brasil; false = detalhe RS/SC/PR
+  let vbBrasil = null; // viewBox atual do svg do Brasil [x, y, w, h], pro zoom
+  let wiredBrasil = false;
 
   // --- Resumo visual de negócios em andamento, por vendedor ---------------
   // Pedido pela Sil em 01/10/2026: mostrar no mapa, dentro de cada cidade,
@@ -342,10 +344,51 @@
         negociosVisiveisBrasil = e.target.checked;
         if (negociosLayerBrasil) negociosLayerBrasil.style.display = negociosVisiveisBrasil ? "" : "none";
       });
+      wireBrasilInteractions();
       brasilLoaded = true;
     } finally {
       loadingEl.classList.add("hidden");
     }
+  }
+
+  // --- Zoom do mapa do Brasil ----------------------------------------------
+  // Pedido pela Sil em 01/10/2026: "ficou muito pequeno quero que ao clicar
+  // de zoom para ver as propostas" — o mapa do Brasil inteiro é pequeno
+  // demais pra ver direito os pontos de negócio quando há muitos no mesmo
+  // estado. Agora clicar em qualquer estado (fora RS/SC/PR, que já abrem o
+  // detalhe por município) aproxima o zoom só naquele estado — mesmo
+  // mecanismo de viewBox usado no mapa de território (setViewBox/zoomAt),
+  // com seus próprios controles de +/-/reset e roda do mouse/arrastar.
+  function setViewBoxBrasil(x, y, w, h) {
+    vbBrasil = [x, y, w, h];
+    document.getElementById("mapa-brasil-svg").setAttribute("viewBox", vbBrasil.join(" "));
+  }
+
+  function zoomAtBrasil(px, py, factor) {
+    const [x, y, w, h] = vbBrasil;
+    const nw = w * factor, nh = h * factor;
+    const nx = px - (px - x) * factor;
+    const ny = py - (py - y) * factor;
+    setViewBoxBrasil(nx, ny, nw, nh);
+  }
+
+  function brasilFullViewBox() {
+    return brasilData.viewBox.split(" ").map(Number);
+  }
+
+  function resetBrasilZoom() {
+    const [x, y, w, h] = brasilFullViewBox();
+    setViewBoxBrasil(x, y, w, h);
+  }
+
+  // Aproxima o zoom pro retângulo do estado clicado (com uma margem, pra não
+  // colar nas bordas) — usa getBBox() do próprio <path> já desenhado.
+  function focusEstado(pathEl) {
+    const b = pathEl.getBBox();
+    const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+    const pad = 1.4;
+    const w = Math.max(b.width * pad, 50), h = Math.max(b.height * pad, 50);
+    setViewBoxBrasil(cx - w / 2, cy - h / 2, w, h);
   }
 
   function buildBrasilSvg() {
@@ -354,6 +397,7 @@
     brasilSvg.innerHTML = "";
     const tooltip2 = document.getElementById("mapa-brasil-tooltip");
     const wrap = document.getElementById("mapa-brasil-mapwrap");
+    vbBrasil = brasilFullViewBox();
 
     brasilData.states.forEach((s) => {
       const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -373,7 +417,7 @@
           : "sem negócios em andamento";
         tooltip2.textContent = isTerritorio
           ? `${s.nome} — ${negocioTxt} — clique para ver no mapa por município`
-          : `${s.nome} — ${negocioTxt}`;
+          : `${s.nome} — ${negocioTxt} — clique para aproximar`;
         tooltip2.style.left = e.clientX - rect.left + 14 + "px";
         tooltip2.style.top = e.clientY - rect.top + 10 + "px";
         tooltip2.style.display = "block";
@@ -381,9 +425,62 @@
       p.addEventListener("mouseleave", () => { tooltip2.style.display = "none"; });
       if (isTerritorio) {
         p.addEventListener("click", () => showDetalhe());
+      } else {
+        p.addEventListener("click", () => focusEstado(p));
       }
       brasilSvg.appendChild(p);
     });
+  }
+
+  // Controles de zoom do mapa do Brasil: botões +/-/reset, roda do mouse e
+  // arrastar pra navegar quando dado zoom — mesmo padrão do mapa de
+  // território (wireInteractions), só que escalado pro svg/viewBox do
+  // Brasil. Roda uma única vez (wiredBrasil evita duplicar os listeners
+  // toda vez que a aba é reaberta, já que buildBrasilSvg só roda 1x).
+  function wireBrasilInteractions() {
+    if (wiredBrasil) return;
+    wiredBrasil = true;
+
+    const brasilSvg = document.getElementById("mapa-brasil-svg");
+    const wrap = document.getElementById("mapa-brasil-mapwrap");
+
+    document.getElementById("mapa-brasil-zoom-in").addEventListener("click", () => {
+      zoomAtBrasil(vbBrasil[0] + vbBrasil[2] / 2, vbBrasil[1] + vbBrasil[3] / 2, 0.8);
+    });
+    document.getElementById("mapa-brasil-zoom-out").addEventListener("click", () => {
+      zoomAtBrasil(vbBrasil[0] + vbBrasil[2] / 2, vbBrasil[1] + vbBrasil[3] / 2, 1.25);
+    });
+    document.getElementById("mapa-brasil-zoom-reset").addEventListener("click", () => resetBrasilZoom());
+
+    wrap.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const rect = wrap.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) / rect.width;
+      const my = (e.clientY - rect.top) / rect.height;
+      const [x, y, w, h] = vbBrasil;
+      const px = x + mx * w, py = y + my * h;
+      zoomAtBrasil(px, py, e.deltaY > 0 ? 1.12 : 0.89);
+    }, { passive: false });
+
+    let dragging = false, lastX = 0, lastY = 0;
+    wrap.addEventListener("mousedown", (e) => {
+      if (e.target.classList && e.target.classList.contains("mapa-brasil-state")) {
+        lastX = e.clientX; lastY = e.clientY; dragging = "maybe"; return;
+      }
+      dragging = true; lastX = e.clientX; lastY = e.clientY; wrap.classList.add("dragging");
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - lastX, dy = e.clientY - lastY;
+      if (dragging === "maybe" && Math.hypot(dx, dy) > 4) { dragging = true; wrap.classList.add("dragging"); }
+      if (dragging === true) {
+        const rect = wrap.getBoundingClientRect();
+        const [x, y, w, h] = vbBrasil;
+        setViewBoxBrasil(x - dx * (w / rect.width), y - dy * (h / rect.height), w, h);
+        lastX = e.clientX; lastY = e.clientY;
+      }
+    });
+    window.addEventListener("mouseup", () => { dragging = false; wrap.classList.remove("dragging"); });
   }
 
   function showBrasil() {
