@@ -14,7 +14,7 @@ const STATUS_COLORS = {
 
 const STATUS_GROUPS = {
   "Prospecção": ["Prospect", "Fazer contato futuro", "Aguardando resposta", "Follow-up"],
-  "Negócios em Andamento": ["Em orçamento", "Negociação", "Cliente", "Perdido"],
+  "Negócios em Andamento": ["Em orçamento", "Cliente", "Negociação", "Perdido"],
   "Arquivados": ["Arquivado"],
 };
 
