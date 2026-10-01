@@ -523,6 +523,11 @@ tbody tr:hover { background: #f9fafc; }
 .mapa-brasil-state--territorio:hover { fill: #6fb8f2; }
 .mapa-brasil-legend { display: flex; flex-wrap: wrap; gap: 16px; padding: 10px 2px 2px; font-size: 12px; color: var(--muted); }
 .mapa-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.mapa-legend-item--link {
+  border: none; background: transparent; padding: 0; font: inherit; color: var(--muted);
+  cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.mapa-legend-item--link:hover { color: var(--text); }
 .mapa-legend-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
 .mapa-legend-ativo { background: #4f8f5c; }
 .mapa-legend-inativo { background: #d7dcd1; }

@@ -415,19 +415,19 @@
         const negocioTxt = agg
           ? `${agg.count} negócio${agg.count === 1 ? "" : "s"} em andamento${agg.totalValor ? " — " + formatBRL(agg.totalValor) : ""}`
           : "sem negócios em andamento";
-        tooltip2.textContent = isTerritorio
-          ? `${s.nome} — ${negocioTxt} — clique para ver no mapa por município`
-          : `${s.nome} — ${negocioTxt} — clique para aproximar`;
+        tooltip2.textContent = `${s.nome} — ${negocioTxt} — clique para aproximar`;
         tooltip2.style.left = e.clientX - rect.left + 14 + "px";
         tooltip2.style.top = e.clientY - rect.top + 10 + "px";
         tooltip2.style.display = "block";
       });
       p.addEventListener("mouseleave", () => { tooltip2.style.display = "none"; });
-      if (isTerritorio) {
-        p.addEventListener("click", () => showDetalhe());
-      } else {
-        p.addEventListener("click", () => focusEstado(p));
-      }
+      // Pedido da Sil em 01/10/2026: clicar num estado (incluindo RS/SC/PR)
+      // só dá zoom pra ver as propostas de perto, igual os outros estados —
+      // antes RS/SC/PR pulava direto pra tela de atribuir território por
+      // município, o que ela não queria mais nesse fluxo. Essa tela de
+      // atribuição continua existindo, só que agora só se chega nela pelo
+      // link "Editar território por vendedor" na legenda (ver wireBrasilInteractions).
+      p.addEventListener("click", () => focusEstado(p));
       brasilSvg.appendChild(p);
     });
   }
@@ -443,6 +443,8 @@
 
     const brasilSvg = document.getElementById("mapa-brasil-svg");
     const wrap = document.getElementById("mapa-brasil-mapwrap");
+
+    document.getElementById("mapa-brasil-territorio-link").addEventListener("click", () => showDetalhe());
 
     document.getElementById("mapa-brasil-zoom-in").addEventListener("click", () => {
       zoomAtBrasil(vbBrasil[0] + vbBrasil[2] / 2, vbBrasil[1] + vbBrasil[3] / 2, 0.8);
