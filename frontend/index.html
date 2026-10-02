@@ -3,20 +3,25 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>CRM · Pré-Fabricados</title>
+<title>CRM · B2 Construções e Pré-Moldados</title>
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div id="login-screen" class="login-screen">
     <form id="login-form" class="login-card">
-      <div class="login-brand"><span class="brand-icon">🧲</span> CRM Pré-Fabricados</div>
+      <div class="login-brand"><span class="brand-icon">🧲</span> CRM B2 Construções e Pré-Moldados</div>
       <p class="sub">Entre com seu usuário e senha</p>
       <label>Usuário
         <input id="login-username" type="text" autocomplete="username" required />
       </label>
       <label>Senha
-        <input id="login-password" type="password" autocomplete="current-password" required />
+        <span class="password-field">
+          <input id="login-password" type="password" autocomplete="current-password" required />
+          <button type="button" class="password-toggle-btn" data-toggle-password="login-password" aria-label="Mostrar senha">👁</button>
+        </span>
       </label>
+      <button type="button" id="forgot-password-btn" class="forgot-password-link">Esqueceu a senha?</button>
+      <p id="forgot-password-info" class="forgot-password-info hidden">Fale com o administrador (Augusto) para redefinir sua senha no painel de usuários.</p>
       <p id="login-error" class="login-error hidden"></p>
       <button type="submit" class="btn btn-primary login-submit">Entrar</button>
     </form>
@@ -27,7 +32,7 @@
     <div class="brand">
       <span class="brand-icon">🧲</span>
       <div>
-        <h1>CRM Pré-Fabricados</h1>
+        <h1>CRM B2 Construções e Pré-Moldados</h1>
         <p id="stat-line" class="stat-line">Carregando…</p>
       </div>
     </div>
@@ -125,7 +130,41 @@
   </main>
 
   <main id="mapa-view" class="mapa-view hidden">
-    <div class="mapa-app">
+    <div id="mapa-brasil" class="mapa-brasil">
+      <div class="mapa-brasil-header">
+        <h1>Mapa Comercial</h1>
+        <p class="sub">Negócios em andamento no Brasil todo — clique em RS, SC ou PR para editar o território por município</p>
+      </div>
+      <div class="mapa-brasil-body">
+        <div id="mapa-brasil-mapwrap" class="mapa-brasil-mapwrap">
+          <svg id="mapa-brasil-svg" viewBox="0 0 613 639"></svg>
+          <div id="mapa-brasil-tooltip" class="mapa-tooltip"></div>
+          <div class="mapa-zoom-controls">
+            <button id="mapa-brasil-zoom-in" class="btn-icon" title="Aproximar">+</button>
+            <button id="mapa-brasil-zoom-out" class="btn-icon" title="Afastar">−</button>
+            <button id="mapa-brasil-zoom-reset" class="btn-icon" title="Ver o Brasil todo">⤢</button>
+          </div>
+          <div id="mapa-brasil-loading" class="mapa-loading">Carregando mapa…</div>
+        </div>
+        <div class="mapa-brasil-side">
+          <div class="mapa-negocios-header">
+            <h1>Negócios em andamento</h1>
+            <label class="checkbox-label"><input type="checkbox" id="mapa-brasil-negocios-toggle" checked /> Mostrar no mapa</label>
+          </div>
+          <p id="mapa-brasil-negocios-summary" class="sub"></p>
+          <div id="mapa-brasil-negocios-legend" class="mapa-negocios-legend mapa-negocios-legend--scroll"></div>
+          <p class="sub mapa-negocios-hint">Clique num vendedor na lista pra mostrar/ocultar só os negócios dele. Pontos com contorno amarelo estão em Negociação.</p>
+        </div>
+      </div>
+      <div class="mapa-brasil-legend">
+        <span class="mapa-legend-item"><i class="mapa-legend-swatch mapa-legend-ativo"></i> Com proposta ativa</span>
+        <span class="mapa-legend-item"><i class="mapa-legend-swatch mapa-legend-inativo"></i> Sem atividade agora</span>
+        <button type="button" id="mapa-brasil-territorio-link" class="mapa-legend-item mapa-legend-item--link"><i class="mapa-legend-swatch mapa-legend-territorio"></i> RS · SC · PR — editar território por vendedor</button>
+      </div>
+      <p class="mapa-credit">Contorno dos estados: <a href="https://mapsvg.com/maps/brazil" target="_blank" rel="noopener">MapSVG</a> (CC BY 4.0)</p>
+    </div>
+
+    <div class="mapa-app hidden">
       <div id="mapa-mapwrap" class="mapa-mapwrap">
         <svg id="mapa-svg"></svg>
         <div id="mapa-tooltip" class="mapa-tooltip"></div>
@@ -138,12 +177,22 @@
       </div>
       <div class="mapa-sidebar">
         <div class="sb-section">
-          <h1>Mapa Comercial</h1>
-          <p class="sub">Territórios por vendedor — RS · SC · PR</p>
+          <button id="mapa-back-btn" class="btn btn-ghost mapa-back-btn">‹ Voltar para o mapa do Brasil</button>
+          <h1>Território por vendedor</h1>
+          <p class="sub">RS · SC · PR</p>
         </div>
         <div class="sb-section">
           <input id="mapa-search" type="text" placeholder="Buscar município…" />
           <div id="mapa-search-results" class="mapa-search-results"></div>
+        </div>
+        <div class="sb-section">
+          <div class="mapa-negocios-header">
+            <h1>Negócios em andamento</h1>
+            <label class="checkbox-label"><input type="checkbox" id="mapa-negocios-toggle" checked /> Mostrar no mapa</label>
+          </div>
+          <p id="mapa-negocios-summary" class="sub"></p>
+          <div id="mapa-negocios-legend" class="mapa-negocios-legend"></div>
+          <p class="sub mapa-negocios-hint">Clique num vendedor pra mostrar/ocultar só os negócios dele. Contorno amarelo = em Negociação.</p>
         </div>
         <div class="sb-scroll">
           <div id="mapa-regions-box"></div>
@@ -181,6 +230,14 @@
       </thead>
       <tbody id="admin-users-tbody"></tbody>
     </table>
+
+    <div class="admin-header admin-sync-box">
+      <div>
+        <h2>Sincronização com o Notion</h2>
+        <p id="admin-sync-status" class="sub">Carregando status…</p>
+      </div>
+      <button id="admin-sync-btn" class="btn btn-ghost">Sincronizar agora</button>
+    </div>
   </main>
 
   <div id="modal-backdrop" class="modal-backdrop hidden">
@@ -236,8 +293,16 @@
           <label>Status do Lead
             <select id="f-status"></select>
           </label>
-          <label>Nº de Orçamentos
-            <input id="f-num" type="number" min="0" />
+          <label>Nº da Proposta
+            <input id="f-num" type="text" />
+          </label>
+        </div>
+        <div class="grid-2">
+          <label>Revisão
+            <input id="f-revisao" type="number" step="1" />
+          </label>
+          <label>Valor
+            <input id="f-valor" type="number" step="0.01" />
           </label>
         </div>
         <label>Tipo de Obra
@@ -310,13 +375,22 @@
         <p id="account-info" class="sub"></p>
         <div class="section-label">Trocar senha</div>
         <label>Senha atual
-          <input id="acc-current-password" type="password" autocomplete="current-password" />
+          <span class="password-field">
+            <input id="acc-current-password" type="password" autocomplete="current-password" />
+            <button type="button" class="password-toggle-btn" data-toggle-password="acc-current-password" aria-label="Mostrar senha">👁</button>
+          </span>
         </label>
         <label>Nova senha
-          <input id="acc-new-password" type="password" autocomplete="new-password" />
+          <span class="password-field">
+            <input id="acc-new-password" type="password" autocomplete="new-password" />
+            <button type="button" class="password-toggle-btn" data-toggle-password="acc-new-password" aria-label="Mostrar senha">👁</button>
+          </span>
         </label>
         <label>Confirmar nova senha
-          <input id="acc-new-password-confirm" type="password" autocomplete="new-password" />
+          <span class="password-field">
+            <input id="acc-new-password-confirm" type="password" autocomplete="new-password" />
+            <button type="button" class="password-toggle-btn" data-toggle-password="acc-new-password-confirm" aria-label="Mostrar senha">👁</button>
+          </span>
         </label>
         <p id="account-error" class="login-error hidden"></p>
         <p id="account-success" class="account-success hidden"></p>
