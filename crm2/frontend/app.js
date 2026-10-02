@@ -584,15 +584,9 @@ function renderCalendar() {
 // Pedido pela Sil em 02/10/2026: mostrar, ao abrir o CRM, um alerta com os
 // compromissos de HOJE (próximo contato de lead e follow-up de atividade,
 // as mesmas 2 fontes do calendário — ver collectCalendarEvents). Só aparece
-// quando há pelo menos 1 compromisso pra hoje, e só 1x por dia por
-// navegador (evita incomodar toda vez que a página é recarregada) — guarda
-// a data do último alerta mostrado no localStorage.
-const AGENDA_POPUP_STORAGE_KEY = "crm_agenda_popup_last_shown";
-
-function todayDateStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+// quando há pelo menos 1 compromisso pra hoje — pedido pela Sil em
+// 02/10/2026: mostrar sempre que o sistema for aberto (login ou
+// recarregar a página), não só 1x por dia.
 
 function collectTodayAgenda() {
   const today = new Date();
@@ -646,12 +640,9 @@ function closeAgendaModal() {
 }
 
 function maybeShowAgendaPopup() {
-  const todayStr = todayDateStr();
-  if (localStorage.getItem(AGENDA_POPUP_STORAGE_KEY) === todayStr) return; // já mostrado hoje
   const items = collectTodayAgenda();
   if (!items.length) return; // nada pra hoje, não mostra pop-up vazio
   openAgendaModal(items);
-  try { localStorage.setItem(AGENDA_POPUP_STORAGE_KEY, todayStr); } catch { /* sem storage: mostra de novo na próxima vez, sem problema */ }
 }
 
 // ---------- Modal ----------
