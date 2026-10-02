@@ -510,16 +510,6 @@ tbody tr:hover { background: #f9fafc; }
 .mapa-negocio-dot:hover { stroke: #20241c; stroke-width: 0.45; }
 .mapa-negocio-dot--negociacao { stroke: #ffd600; stroke-width: 0.5; }
 .mapa-negocio-dot--negociacao:hover { stroke: #ffb300; stroke-width: 0.75; }
-/* Rótulo com o nome da cidade, 1 por município com negócio — pedido pela
-   Sil em 01/10/2026. Tamanho pequeno de propósito (o mapa é denso); dá pra
-   ler melhor usando o zoom (clique no estado ou roda do mouse). O contorno
-   branco (paint-order + stroke) funciona como um "halo" pra não sumir em
-   cima das cores do mapa. */
-.mapa-negocio-label {
-  font-size: 4px; fill: #20241c; text-anchor: middle; pointer-events: none; user-select: none;
-  paint-order: stroke; stroke: #fff; stroke-width: 0.6px; font-weight: 600;
-}
-.mapa-negocio-label--brasil { font-size: 2.4px; stroke-width: 0.4px; }
 
 /* ---------- Mapa Comercial: visão nacional (Brasil) ---------- */
 .mapa-brasil { padding: 20px 24px 10px; display: flex; flex-direction: column; height: calc(100vh - 140px); box-sizing: border-box; }

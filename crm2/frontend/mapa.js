@@ -58,10 +58,6 @@
   let negociosLayer = null; // <g> no svg do território
   let negociosLayerBrasil = null; // <g> no svg do Brasil
   let muniIndexNacional = null; // "nome normalizado|UF" -> {x,y}, carregado sob demanda
-  let cidadesTerritorio = []; // [{key, nome, x, y}] — 1 por município com negócio (território)
-  let cidadesBrasil = []; // idem, mapa do Brasil inteiro
-  let negociosLabelsLayer = null; // <g> de rótulos de cidade no território
-  let negociosLabelsLayerBrasil = null; // <g> de rótulos de cidade no Brasil
 
   function normalizeCidade(str) {
     return String(str || "")
@@ -133,7 +129,6 @@
   // há mais de um negócio no mesmo município, pra não ficarem 100% sobrepostos).
   function buildNegociosPoints() {
     negociosPoints = [];
-    cidadesTerritorio = [];
     if (!MAP) return;
     const muniIndex = new Map(); // "nome normalizado|UF" -> município
     MAP.municipios.forEach((m) => {
@@ -150,7 +145,6 @@
       const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
       const idx = countPorMuni.get(m.c) || 0;
       countPorMuni.set(m.c, idx + 1);
-      if (idx === 0) cidadesTerritorio.push({ key: m.c, nome: m.n, x: cx, y: cy });
       // Espalha em espiral (ângulo dourado) ao redor do centro do município.
       // Antes o raio máximo era baseado no tamanho do retângulo (bbox) do
       // município — em municípios grandes/compridos isso deixava pontos
@@ -170,7 +164,6 @@
         valor: n.valor,
         numero_proposta: n.numero_proposta,
         status: n.status,
-        cidadeKey: m.c,
       });
     });
   }
@@ -181,7 +174,6 @@
   // bem menor (o mapa nacional é bem mais "zoomado out").
   function buildNegociosPointsBrasil() {
     negociosPointsBrasil = [];
-    cidadesBrasil = [];
     if (!muniIndexNacional) return;
     const countPorMuni = new Map();
     negocios.forEach((n) => {
@@ -191,7 +183,6 @@
       if (!m) return;
       const idx = countPorMuni.get(key) || 0;
       countPorMuni.set(key, idx + 1);
-      if (idx === 0) cidadesBrasil.push({ key, nome: m.n, x: m.x, y: m.y });
       const angle = idx * 2.4;
       const radius = idx === 0 ? 0 : Math.min(0.35 + idx * 0.2, 1.8);
       negociosPointsBrasil.push({
@@ -204,7 +195,6 @@
         valor: n.valor,
         numero_proposta: n.numero_proposta,
         status: n.status,
-        cidadeKey: key,
       });
     });
   }
@@ -297,30 +287,6 @@
       negociosLayer.appendChild(c);
     });
     svg.appendChild(negociosLayer);
-    renderNegociosLabelsTerritorio();
-  }
-
-  // Rótulo com o nome da cidade, 1 por município que tenha pelo menos 1
-  // negócio visível (considerando o filtro de vendedor) — pedido pela Sil
-  // em 01/10/2026: "mostrar as cidades no mapa". Fica achado automaticamente
-  // toda vez que os pontos são redesenhados (filtro de vendedor, recarga).
-  function renderNegociosLabelsTerritorio() {
-    if (!svg) return;
-    if (negociosLabelsLayer) negociosLabelsLayer.remove();
-    negociosLabelsLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
-    negociosLabelsLayer.setAttribute("id", "mapa-negocios-labels");
-    negociosLabelsLayer.style.display = negociosVisiveis ? "" : "none";
-    cidadesTerritorio.forEach((c) => {
-      const visivel = negociosPoints.some((p) => p.cidadeKey === c.key && !vendedorOcultos.has(p.vendedor || ""));
-      if (!visivel) return;
-      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      t.setAttribute("x", c.x);
-      t.setAttribute("y", c.y - 2.6);
-      t.setAttribute("class", "mapa-negocio-label");
-      t.textContent = c.nome;
-      negociosLabelsLayer.appendChild(t);
-    });
-    svg.appendChild(negociosLabelsLayer);
   }
 
   // Igual a renderNegociosLayer, mas desenha no svg do mapa do Brasil
@@ -359,28 +325,6 @@
       negociosLayerBrasil.appendChild(c);
     });
     brasilSvg.appendChild(negociosLayerBrasil);
-    renderNegociosLabelsBrasil();
-  }
-
-  // Igual a renderNegociosLabelsTerritorio, mas pro mapa do Brasil inteiro.
-  function renderNegociosLabelsBrasil() {
-    const brasilSvg = document.getElementById("mapa-brasil-svg");
-    if (!brasilSvg) return;
-    if (negociosLabelsLayerBrasil) negociosLabelsLayerBrasil.remove();
-    negociosLabelsLayerBrasil = document.createElementNS("http://www.w3.org/2000/svg", "g");
-    negociosLabelsLayerBrasil.setAttribute("id", "mapa-brasil-negocios-labels");
-    negociosLabelsLayerBrasil.style.display = negociosVisiveisBrasil ? "" : "none";
-    cidadesBrasil.forEach((c) => {
-      const visivel = negociosPointsBrasil.some((p) => p.cidadeKey === c.key && !vendedorOcultos.has(p.vendedor || ""));
-      if (!visivel) return;
-      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      t.setAttribute("x", c.x);
-      t.setAttribute("y", c.y - 1.6);
-      t.setAttribute("class", "mapa-negocio-label mapa-negocio-label--brasil");
-      t.textContent = c.nome;
-      negociosLabelsLayerBrasil.appendChild(t);
-    });
-    brasilSvg.appendChild(negociosLabelsLayerBrasil);
   }
 
   async function ensureBrasilLoaded() {
@@ -414,7 +358,6 @@
       document.getElementById("mapa-brasil-negocios-toggle").addEventListener("change", (e) => {
         negociosVisiveisBrasil = e.target.checked;
         if (negociosLayerBrasil) negociosLayerBrasil.style.display = negociosVisiveisBrasil ? "" : "none";
-        if (negociosLabelsLayerBrasil) negociosLabelsLayerBrasil.style.display = negociosVisiveisBrasil ? "" : "none";
       });
       wireBrasilInteractions();
       brasilLoaded = true;
@@ -846,7 +789,6 @@
     document.getElementById("mapa-negocios-toggle").addEventListener("change", (e) => {
       negociosVisiveis = e.target.checked;
       if (negociosLayer) negociosLayer.style.display = negociosVisiveis ? "" : "none";
-      if (negociosLabelsLayer) negociosLabelsLayer.style.display = negociosVisiveis ? "" : "none";
     });
 
     window.addEventListener("beforeunload", (e) => {
