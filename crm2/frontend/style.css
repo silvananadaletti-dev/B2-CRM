@@ -439,6 +439,18 @@ tbody tr:hover { background: #f9fafc; }
   position: absolute; display: none; pointer-events: none; background: #20241c; color: #fff;
   font-size: 12px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; z-index: 5;
 }
+/* Legenda de vendedores flutuando em cima do mapa (clicável, liga/desliga o
+   filtro) — pedido pela Sil em 02/10/2026: "trazer no mapa a opção de
+   selecionar os vendedores por cor". Fica sempre visível junto com o mapa,
+   sem depender do painel lateral (que em janelas mais estreitas pode ficar
+   fora da área visível). Reaproveita a mesma lista/classes do painel
+   lateral (ver renderNegociosLegend em mapa.js). */
+.mapa-overlay-legend {
+  position: absolute; top: 14px; left: 14px; z-index: 5; max-width: 200px; max-height: 60%;
+  overflow-y: auto; background: rgba(255, 255, 255, 0.94); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, .15); font-size: 12px;
+}
+.mapa-overlay-legend:empty { display: none; }
 .mapa-zoom-controls { position: absolute; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 4px; }
 .mapa-zoom-controls .btn-icon {
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px; width: 30px; height: 30px;
@@ -494,10 +506,20 @@ tbody tr:hover { background: #f9fafc; }
 .mapa-negocio-legend-item.off { opacity: 0.4; }
 .mapa-negocio-legend-swatch { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,.25); }
 .mapa-negocio-legend-count { margin-left: auto; color: var(--muted); font-size: 11px; }
-.mapa-negocio-dot { cursor: pointer; stroke: #fff; stroke-width: 0.4; }
-.mapa-negocio-dot:hover { stroke: #20241c; stroke-width: 0.9; }
-.mapa-negocio-dot--negociacao { stroke: #ffd600; stroke-width: 1.4; }
-.mapa-negocio-dot--negociacao:hover { stroke: #ffb300; stroke-width: 1.8; }
+.mapa-negocio-dot { cursor: pointer; stroke: #fff; stroke-width: 0.15; }
+.mapa-negocio-dot:hover { stroke: #20241c; stroke-width: 0.45; }
+.mapa-negocio-dot--negociacao { stroke: #ffd600; stroke-width: 0.5; }
+.mapa-negocio-dot--negociacao:hover { stroke: #ffb300; stroke-width: 0.75; }
+/* Rótulo com o nome da cidade, 1 por município com negócio — pedido pela
+   Sil em 01/10/2026. Tamanho pequeno de propósito (o mapa é denso); dá pra
+   ler melhor usando o zoom (clique no estado ou roda do mouse). O contorno
+   branco (paint-order + stroke) funciona como um "halo" pra não sumir em
+   cima das cores do mapa. */
+.mapa-negocio-label {
+  font-size: 4px; fill: #20241c; text-anchor: middle; pointer-events: none; user-select: none;
+  paint-order: stroke; stroke: #fff; stroke-width: 0.6px; font-weight: 600;
+}
+.mapa-negocio-label--brasil { font-size: 2.4px; stroke-width: 0.4px; }
 
 /* ---------- Mapa Comercial: visão nacional (Brasil) ---------- */
 .mapa-brasil { padding: 20px 24px 10px; display: flex; flex-direction: column; height: calc(100vh - 140px); box-sizing: border-box; }

@@ -58,6 +58,10 @@
   let negociosLayer = null; // <g> no svg do território
   let negociosLayerBrasil = null; // <g> no svg do Brasil
   let muniIndexNacional = null; // "nome normalizado|UF" -> {x,y}, carregado sob demanda
+  let cidadesTerritorio = []; // [{key, nome, x, y}] — 1 por município com negócio (território)
+  let cidadesBrasil = []; // idem, mapa do Brasil inteiro
+  let negociosLabelsLayer = null; // <g> de rótulos de cidade no território
+  let negociosLabelsLayerBrasil = null; // <g> de rótulos de cidade no Brasil
 
   function normalizeCidade(str) {
     return String(str || "")
@@ -129,6 +133,7 @@
   // há mais de um negócio no mesmo município, pra não ficarem 100% sobrepostos).
   function buildNegociosPoints() {
     negociosPoints = [];
+    cidadesTerritorio = [];
     if (!MAP) return;
     const muniIndex = new Map(); // "nome normalizado|UF" -> município
     MAP.municipios.forEach((m) => {
@@ -145,10 +150,16 @@
       const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
       const idx = countPorMuni.get(m.c) || 0;
       countPorMuni.set(m.c, idx + 1);
-      // Espalha em espiral (ângulo dourado) ao redor do centro do município —
-      // cresce bem devagar pra caber dentro de municípios pequenos também.
+      if (idx === 0) cidadesTerritorio.push({ key: m.c, nome: m.n, x: cx, y: cy });
+      // Espalha em espiral (ângulo dourado) ao redor do centro do município.
+      // Antes o raio máximo era baseado no tamanho do retângulo (bbox) do
+      // município — em municípios grandes/compridos isso deixava pontos
+      // "escapando" bem longe do centro, caindo fora da área real da cidade
+      // (às vezes até fora do território desenhado). Agora o teto é um valor
+      // fixo e pequeno, igual pra qualquer município: por mais negócios que
+      // tenha na mesma cidade, o conjunto fica sempre bem agrupado nela.
       const angle = idx * 2.4;
-      const radius = idx === 0 ? 0 : Math.min(1 + idx * 0.55, Math.max((x1 - x0), (y1 - y0)) / 2.2);
+      const radius = idx === 0 ? 0 : Math.min(0.6 + idx * 0.3, 5);
       negociosPoints.push({
         x: cx + Math.cos(angle) * radius,
         y: cy + Math.sin(angle) * radius,
@@ -159,6 +170,7 @@
         valor: n.valor,
         numero_proposta: n.numero_proposta,
         status: n.status,
+        cidadeKey: m.c,
       });
     });
   }
@@ -169,6 +181,7 @@
   // bem menor (o mapa nacional é bem mais "zoomado out").
   function buildNegociosPointsBrasil() {
     negociosPointsBrasil = [];
+    cidadesBrasil = [];
     if (!muniIndexNacional) return;
     const countPorMuni = new Map();
     negocios.forEach((n) => {
@@ -178,8 +191,9 @@
       if (!m) return;
       const idx = countPorMuni.get(key) || 0;
       countPorMuni.set(key, idx + 1);
+      if (idx === 0) cidadesBrasil.push({ key, nome: m.n, x: m.x, y: m.y });
       const angle = idx * 2.4;
-      const radius = idx === 0 ? 0 : Math.min(0.6 + idx * 0.35, 2.5);
+      const radius = idx === 0 ? 0 : Math.min(0.35 + idx * 0.2, 1.8);
       negociosPointsBrasil.push({
         x: m.x + Math.cos(angle) * radius,
         y: m.y + Math.sin(angle) * radius,
@@ -190,6 +204,7 @@
         valor: n.valor,
         numero_proposta: n.numero_proposta,
         status: n.status,
+        cidadeKey: key,
       });
     });
   }
@@ -201,14 +216,21 @@
     else vendedorOcultos.add(v);
     renderNegociosLegend("mapa-negocios-legend", "mapa-negocios-summary", negociosPoints.length);
     renderNegociosLegend("mapa-brasil-negocios-legend", "mapa-brasil-negocios-summary", negociosPointsBrasil.length);
+    renderNegociosLegend("mapa-overlay-legend", null, negociosPoints.length);
+    renderNegociosLegend("mapa-brasil-overlay-legend", null, negociosPointsBrasil.length);
     renderNegociosLayer();
     renderNegociosLayerBrasil();
   }
 
+  // summaryId é opcional — a legenda flutuante em cima do mapa (pedida pela
+  // Sil em 02/10/2026: "trazer no mapa a opção de selecionar os vendedores
+  // por cor", pra não depender só do painel lateral, que em telas mais
+  // estreitas pode ficar fora da área visível) não tem um texto de resumo,
+  // só a lista de vendedores clicável.
   function renderNegociosLegend(boxId, summaryId, localizados) {
     const box = document.getElementById(boxId);
-    const summary = document.getElementById(summaryId);
-    if (!box || !summary) return;
+    const summary = summaryId ? document.getElementById(summaryId) : null;
+    if (!box || (summaryId && !summary)) return;
     const porVendedor = new Map(); // vendedor ("" = sem vendedor) -> count
     negocios.forEach((n) => {
       const v = n.vendedor || "";
@@ -229,9 +251,11 @@
     box.querySelectorAll(".mapa-negocio-legend-item").forEach((el) => {
       el.addEventListener("click", () => toggleVendedorFiltro(el.getAttribute("data-v")));
     });
-    summary.textContent = negocios.length
-      ? `${negocios.length} negócios em andamento (Em orçamento, Negociação e Cliente) — ${localizados} localizados no mapa`
-      : "Nenhum negócio em andamento no momento.";
+    if (summary) {
+      summary.textContent = negocios.length
+        ? `${negocios.length} negócios em andamento (Em orçamento, Negociação e Cliente) — ${localizados} localizados no mapa`
+        : "Nenhum negócio em andamento no momento.";
+    }
   }
 
   function negocioDotClass(p) {
@@ -249,7 +273,7 @@
       const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       c.setAttribute("cx", p.x);
       c.setAttribute("cy", p.y);
-      c.setAttribute("r", 2.1);
+      c.setAttribute("r", 0.8);
       c.setAttribute("fill", p.color);
       c.setAttribute("class", negocioDotClass(p));
       c.addEventListener("mousemove", (e) => {
@@ -273,6 +297,30 @@
       negociosLayer.appendChild(c);
     });
     svg.appendChild(negociosLayer);
+    renderNegociosLabelsTerritorio();
+  }
+
+  // Rótulo com o nome da cidade, 1 por município que tenha pelo menos 1
+  // negócio visível (considerando o filtro de vendedor) — pedido pela Sil
+  // em 01/10/2026: "mostrar as cidades no mapa". Fica achado automaticamente
+  // toda vez que os pontos são redesenhados (filtro de vendedor, recarga).
+  function renderNegociosLabelsTerritorio() {
+    if (!svg) return;
+    if (negociosLabelsLayer) negociosLabelsLayer.remove();
+    negociosLabelsLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    negociosLabelsLayer.setAttribute("id", "mapa-negocios-labels");
+    negociosLabelsLayer.style.display = negociosVisiveis ? "" : "none";
+    cidadesTerritorio.forEach((c) => {
+      const visivel = negociosPoints.some((p) => p.cidadeKey === c.key && !vendedorOcultos.has(p.vendedor || ""));
+      if (!visivel) return;
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      t.setAttribute("x", c.x);
+      t.setAttribute("y", c.y - 2.6);
+      t.setAttribute("class", "mapa-negocio-label");
+      t.textContent = c.nome;
+      negociosLabelsLayer.appendChild(t);
+    });
+    svg.appendChild(negociosLabelsLayer);
   }
 
   // Igual a renderNegociosLayer, mas desenha no svg do mapa do Brasil
@@ -291,7 +339,7 @@
       const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       c.setAttribute("cx", p.x);
       c.setAttribute("cy", p.y);
-      c.setAttribute("r", 1.6);
+      c.setAttribute("r", 0.5);
       c.setAttribute("fill", p.color);
       c.setAttribute("class", negocioDotClass(p));
       c.addEventListener("mousemove", (e) => {
@@ -311,6 +359,28 @@
       negociosLayerBrasil.appendChild(c);
     });
     brasilSvg.appendChild(negociosLayerBrasil);
+    renderNegociosLabelsBrasil();
+  }
+
+  // Igual a renderNegociosLabelsTerritorio, mas pro mapa do Brasil inteiro.
+  function renderNegociosLabelsBrasil() {
+    const brasilSvg = document.getElementById("mapa-brasil-svg");
+    if (!brasilSvg) return;
+    if (negociosLabelsLayerBrasil) negociosLabelsLayerBrasil.remove();
+    negociosLabelsLayerBrasil = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    negociosLabelsLayerBrasil.setAttribute("id", "mapa-brasil-negocios-labels");
+    negociosLabelsLayerBrasil.style.display = negociosVisiveisBrasil ? "" : "none";
+    cidadesBrasil.forEach((c) => {
+      const visivel = negociosPointsBrasil.some((p) => p.cidadeKey === c.key && !vendedorOcultos.has(p.vendedor || ""));
+      if (!visivel) return;
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      t.setAttribute("x", c.x);
+      t.setAttribute("y", c.y - 1.6);
+      t.setAttribute("class", "mapa-negocio-label mapa-negocio-label--brasil");
+      t.textContent = c.nome;
+      negociosLabelsLayerBrasil.appendChild(t);
+    });
+    brasilSvg.appendChild(negociosLabelsLayerBrasil);
   }
 
   async function ensureBrasilLoaded() {
@@ -340,9 +410,11 @@
       buildNegociosPointsBrasil();
       renderNegociosLayerBrasil();
       renderNegociosLegend("mapa-brasil-negocios-legend", "mapa-brasil-negocios-summary", negociosPointsBrasil.length);
+      renderNegociosLegend("mapa-brasil-overlay-legend", null, negociosPointsBrasil.length);
       document.getElementById("mapa-brasil-negocios-toggle").addEventListener("change", (e) => {
         negociosVisiveisBrasil = e.target.checked;
         if (negociosLayerBrasil) negociosLayerBrasil.style.display = negociosVisiveisBrasil ? "" : "none";
+        if (negociosLabelsLayerBrasil) negociosLabelsLayerBrasil.style.display = negociosVisiveisBrasil ? "" : "none";
       });
       wireBrasilInteractions();
       brasilLoaded = true;
@@ -774,6 +846,7 @@
     document.getElementById("mapa-negocios-toggle").addEventListener("change", (e) => {
       negociosVisiveis = e.target.checked;
       if (negociosLayer) negociosLayer.style.display = negociosVisiveis ? "" : "none";
+      if (negociosLabelsLayer) negociosLabelsLayer.style.display = negociosVisiveis ? "" : "none";
     });
 
     window.addEventListener("beforeunload", (e) => {
@@ -814,6 +887,7 @@
       buildNegociosPoints();
       renderNegociosLayer();
       renderNegociosLegend("mapa-negocios-legend", "mapa-negocios-summary", negociosPoints.length);
+      renderNegociosLegend("mapa-overlay-legend", null, negociosPoints.length);
       setViewBox(0, 0, MAP.width, MAP.height);
       wireInteractions();
       loaded = true;
