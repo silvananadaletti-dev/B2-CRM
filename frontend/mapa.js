@@ -216,14 +216,21 @@
     else vendedorOcultos.add(v);
     renderNegociosLegend("mapa-negocios-legend", "mapa-negocios-summary", negociosPoints.length);
     renderNegociosLegend("mapa-brasil-negocios-legend", "mapa-brasil-negocios-summary", negociosPointsBrasil.length);
+    renderNegociosLegend("mapa-overlay-legend", null, negociosPoints.length);
+    renderNegociosLegend("mapa-brasil-overlay-legend", null, negociosPointsBrasil.length);
     renderNegociosLayer();
     renderNegociosLayerBrasil();
   }
 
+  // summaryId é opcional — a legenda flutuante em cima do mapa (pedida pela
+  // Sil em 02/10/2026: "trazer no mapa a opção de selecionar os vendedores
+  // por cor", pra não depender só do painel lateral, que em telas mais
+  // estreitas pode ficar fora da área visível) não tem um texto de resumo,
+  // só a lista de vendedores clicável.
   function renderNegociosLegend(boxId, summaryId, localizados) {
     const box = document.getElementById(boxId);
-    const summary = document.getElementById(summaryId);
-    if (!box || !summary) return;
+    const summary = summaryId ? document.getElementById(summaryId) : null;
+    if (!box || (summaryId && !summary)) return;
     const porVendedor = new Map(); // vendedor ("" = sem vendedor) -> count
     negocios.forEach((n) => {
       const v = n.vendedor || "";
@@ -244,9 +251,11 @@
     box.querySelectorAll(".mapa-negocio-legend-item").forEach((el) => {
       el.addEventListener("click", () => toggleVendedorFiltro(el.getAttribute("data-v")));
     });
-    summary.textContent = negocios.length
-      ? `${negocios.length} negócios em andamento (Em orçamento, Negociação e Cliente) — ${localizados} localizados no mapa`
-      : "Nenhum negócio em andamento no momento.";
+    if (summary) {
+      summary.textContent = negocios.length
+        ? `${negocios.length} negócios em andamento (Em orçamento, Negociação e Cliente) — ${localizados} localizados no mapa`
+        : "Nenhum negócio em andamento no momento.";
+    }
   }
 
   function negocioDotClass(p) {
@@ -264,7 +273,7 @@
       const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       c.setAttribute("cx", p.x);
       c.setAttribute("cy", p.y);
-      c.setAttribute("r", 1.1);
+      c.setAttribute("r", 0.8);
       c.setAttribute("fill", p.color);
       c.setAttribute("class", negocioDotClass(p));
       c.addEventListener("mousemove", (e) => {
@@ -330,7 +339,7 @@
       const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       c.setAttribute("cx", p.x);
       c.setAttribute("cy", p.y);
-      c.setAttribute("r", 0.7);
+      c.setAttribute("r", 0.5);
       c.setAttribute("fill", p.color);
       c.setAttribute("class", negocioDotClass(p));
       c.addEventListener("mousemove", (e) => {
@@ -401,6 +410,7 @@
       buildNegociosPointsBrasil();
       renderNegociosLayerBrasil();
       renderNegociosLegend("mapa-brasil-negocios-legend", "mapa-brasil-negocios-summary", negociosPointsBrasil.length);
+      renderNegociosLegend("mapa-brasil-overlay-legend", null, negociosPointsBrasil.length);
       document.getElementById("mapa-brasil-negocios-toggle").addEventListener("change", (e) => {
         negociosVisiveisBrasil = e.target.checked;
         if (negociosLayerBrasil) negociosLayerBrasil.style.display = negociosVisiveisBrasil ? "" : "none";
@@ -877,6 +887,7 @@
       buildNegociosPoints();
       renderNegociosLayer();
       renderNegociosLegend("mapa-negocios-legend", "mapa-negocios-summary", negociosPoints.length);
+      renderNegociosLegend("mapa-overlay-legend", null, negociosPoints.length);
       setViewBox(0, 0, MAP.width, MAP.height);
       wireInteractions();
       loaded = true;
