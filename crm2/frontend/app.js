@@ -18,6 +18,18 @@ const STATUS_GROUPS = {
   "Arquivados": ["Arquivado"],
 };
 
+// Rótulo exibido na tela para cada status — só muda o texto mostrado ao
+// usuário, o valor real gravado no banco ("Cliente") continua o mesmo, então
+// nada na sincronização com o Notion, filtros ou dados já salvos precisa
+// mudar. Pedido pela Sil em 01/10/2026: mostrar "Proposta" no lugar de
+// "Cliente" (coluna do Kanban, lista e seletor de status no cadastro).
+const STATUS_LABELS = {
+  "Cliente": "Proposta",
+};
+function statusLabel(status) {
+  return STATUS_LABELS[status] || status;
+}
+
 const PT_MONTHS = { jan: 0, fev: 1, mar: 2, abr: 3, mai: 4, jun: 5, jul: 6, ago: 7, set: 8, out: 9, nov: 10, dez: 11 };
 const MONTH_NAMES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
@@ -203,6 +215,7 @@ async function loadAll() {
   renderFilters();
   renderStats(stats);
   render();
+  maybeShowAgendaPopup();
 }
 
 function renderStats(stats) {
@@ -226,7 +239,7 @@ function renderFilters() {
   fVendedor.innerHTML = '<option value="">(sem vendedor)</option>' +
     state.meta.vendedor_options.map((v) => `<option value="${v}">${v}</option>`).join("");
   const fStatus = $("#f-status");
-  fStatus.innerHTML = state.meta.status_options.map((s) => `<option value="${s}">${s}</option>`).join("");
+  fStatus.innerHTML = state.meta.status_options.map((s) => `<option value="${s}">${statusLabel(s)}</option>`).join("");
   const aCanal = $("#a-canal");
   aCanal.innerHTML = state.meta.canal_options.map((c) => `<option value="${c}">${c}</option>`).join("");
 
@@ -354,7 +367,7 @@ function renderKanban(filtered) {
 
     col.innerHTML = `
       <div class="kanban-column-header">
-        <span>${status}</span>
+        <span>${statusLabel(status)}</span>
         <span class="kanban-column-count">${items.length}</span>
       </div>
       <div class="kanban-column-body" data-status="${escapeHtml(status)}"></div>
@@ -433,7 +446,7 @@ function renderList(filtered) {
       <td>${escapeHtml(l.segmento)}</td>
       <td>${escapeHtml(l.cidade)}</td>
       <td>${escapeHtml(l.vendedor)}</td>
-      <td><span class="status-pill ${statusClass}">${escapeHtml(l.status)}</span></td>
+      <td><span class="status-pill ${statusClass}">${escapeHtml(statusLabel(l.status))}</span></td>
       <td>${escapeHtml(l.proximo_contato)}</td>
     `;
     tr.addEventListener("click", () => openModal(l.id));
@@ -565,6 +578,80 @@ function renderCalendar() {
   }
 
   $("#calendar-count").textContent = `${events.length} compromisso${events.length === 1 ? "" : "s"} a partir de hoje`;
+}
+
+// ---------- Alerta de agenda do dia (pop-up ao abrir o sistema) ----------
+// Pedido pela Sil em 02/10/2026: mostrar, ao abrir o CRM, um alerta com os
+// compromissos de HOJE (próximo contato de lead e follow-up de atividade,
+// as mesmas 2 fontes do calendário — ver collectCalendarEvents). Só aparece
+// quando há pelo menos 1 compromisso pra hoje, e só 1x por dia por
+// navegador (evita incomodar toda vez que a página é recarregada) — guarda
+// a data do último alerta mostrado no localStorage.
+const AGENDA_POPUP_STORAGE_KEY = "crm_agenda_popup_last_shown";
+
+function todayDateStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function collectTodayAgenda() {
+  const today = new Date();
+  const isToday = (d) => d && d.exact && d.year === today.getFullYear() && d.month === today.getMonth() && d.day === today.getDate();
+  const items = [];
+  state.leads.forEach((lead) => {
+    const d = parseLooseDate(lead.proximo_contato);
+    if (isToday(d)) items.push({ type: "contato", lead });
+  });
+  state.activities.forEach((act) => {
+    const d = parseLooseDate(act.data_followup);
+    if (!isToday(d)) return;
+    const lead = state.leads.find((l) => l.id === act.lead_id);
+    if (lead) items.push({ type: "followup", lead, activity: act });
+  });
+  return items;
+}
+
+function renderAgendaPopup(items) {
+  const list = $("#agenda-modal-list");
+  list.innerHTML = items.map((it) => {
+    const icon = it.type === "followup" ? "🔔" : "📞";
+    const titulo = it.type === "followup" ? "Follow-up" : "Próximo contato";
+    const detalhe = it.type === "followup" ? (it.activity.assunto || "sem assunto") : (it.lead.cidade || "");
+    return `
+      <div class="agenda-modal-item" data-id="${it.lead.id}">
+        <span class="agenda-modal-icon">${icon}</span>
+        <div class="agenda-modal-info">
+          <div class="agenda-modal-cliente">${escapeHtml(it.lead.cliente_empresa)}</div>
+          <div class="agenda-modal-sub">${titulo}${detalhe ? " — " + escapeHtml(detalhe) : ""}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+  list.querySelectorAll(".agenda-modal-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      closeAgendaModal();
+      openModal(Number(el.getAttribute("data-id")));
+    });
+  });
+}
+
+function openAgendaModal(items) {
+  const d = new Date();
+  $("#agenda-modal-date").textContent = d.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
+  renderAgendaPopup(items);
+  $("#agenda-modal").classList.remove("hidden");
+}
+function closeAgendaModal() {
+  $("#agenda-modal").classList.add("hidden");
+}
+
+function maybeShowAgendaPopup() {
+  const todayStr = todayDateStr();
+  if (localStorage.getItem(AGENDA_POPUP_STORAGE_KEY) === todayStr) return; // já mostrado hoje
+  const items = collectTodayAgenda();
+  if (!items.length) return; // nada pra hoje, não mostra pop-up vazio
+  openAgendaModal(items);
+  try { localStorage.setItem(AGENDA_POPUP_STORAGE_KEY, todayStr); } catch { /* sem storage: mostra de novo na próxima vez, sem problema */ }
 }
 
 // ---------- Modal ----------
@@ -891,6 +978,12 @@ $("#account-modal-close").addEventListener("click", closeAccountModal);
 $("#account-cancel-btn").addEventListener("click", closeAccountModal);
 $("#account-modal").addEventListener("click", (e) => {
   if (e.target.id === "account-modal") closeAccountModal();
+});
+
+$("#agenda-modal-close").addEventListener("click", closeAgendaModal);
+$("#agenda-modal-ok-btn").addEventListener("click", closeAgendaModal);
+$("#agenda-modal").addEventListener("click", (e) => {
+  if (e.target.id === "agenda-modal") closeAgendaModal();
 });
 $("#account-save-btn").addEventListener("click", async () => {
   const current = $("#acc-current-password").value;
